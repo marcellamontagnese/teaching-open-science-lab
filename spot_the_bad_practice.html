@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spot the Bad Practice — PBS03</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #0a0a2e;
+    color: #e0e0e0;
+    min-height: 100vh;
+  }
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 30px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 2rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #8888cc;
+    margin-bottom: 30px;
+    font-size: 1rem;
+  }
+
+  .scenario-card {
+    background: #12124a;
+    border-radius: 16px;
+    padding: 30px;
+    border: 1px solid #2a2a6a;
+    margin-bottom: 20px;
+    transition: all 0.3s;
+  }
+  .scenario-card.active {
+    border-color: #4a6cf7;
+    box-shadow: 0 0 30px rgba(74,108,247,0.15);
+  }
+
+  .scenario-number {
+    display: inline-block;
+    background: #4a6cf7;
+    color: #fff;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 32px;
+    font-weight: 700;
+    font-size: 0.9rem;
+    margin-bottom: 12px;
+  }
+
+  .scenario-text {
+    font-size: 1.1rem;
+    line-height: 1.7;
+    color: #ddd;
+    background: #0d0d3a;
+    padding: 18px 22px;
+    border-radius: 10px;
+    border-left: 3px solid #4a6cf7;
+    margin-bottom: 20px;
+    font-style: italic;
+  }
+
+  .options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 15px;
+  }
+  @media (max-width: 600px) {
+    .options { grid-template-columns: 1fr; }
+  }
+
+  .option-btn {
+    padding: 14px 20px;
+    border-radius: 12px;
+    border: 2px solid #3a3a7a;
+    background: #1a1a4e;
+    color: #ccc;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+    font-weight: 500;
+  }
+  .option-btn:hover {
+    border-color: #6a6aff;
+    background: #2a2a6e;
+    color: #fff;
+  }
+  .option-btn.selected {
+    border-color: #ffaa44;
+    background: #2a2a4e;
+    color: #ffaa44;
+  }
+  .option-btn.correct {
+    border-color: #44cc66;
+    background: #1a3a2a;
+    color: #44cc66;
+    animation: correctPulse 0.5s;
+  }
+  .option-btn.wrong {
+    border-color: #cc4444;
+    background: #3a1a1a;
+    color: #cc4444;
+  }
+
+  @keyframes correctPulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.03); }
+    100% { transform: scale(1); }
+  }
+
+  .feedback {
+    padding: 16px 20px;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    display: none;
+  }
+  .feedback.show { display: block; }
+  .feedback.correct-fb {
+    background: #0d2a1a;
+    border: 1px solid #2a6a3a;
+    color: #88ddaa;
+  }
+  .feedback.wrong-fb {
+    background: #2a0d0d;
+    border: 1px solid #6a2a2a;
+    color: #dd8888;
+  }
+
+  .nav-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-top: 25px;
+  }
+  .nav-btn {
+    padding: 12px 30px;
+    border-radius: 10px;
+    border: none;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .nav-btn.primary {
+    background: linear-gradient(135deg, #4a6cf7, #6c3ef7);
+    color: #fff;
+  }
+  .nav-btn.primary:hover { transform: scale(1.05); }
+  .nav-btn.secondary {
+    background: #333;
+    color: #ccc;
+  }
+  .nav-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  .score-bar {
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    margin-bottom: 25px;
+    padding: 12px;
+    background: #12124a;
+    border-radius: 12px;
+  }
+  .score-item {
+    text-align: center;
+  }
+  .score-num {
+    font-size: 1.8rem;
+    font-weight: 700;
+  }
+  .score-label {
+    font-size: 0.8rem;
+    color: #888;
+  }
+  .green { color: #44cc66; }
+  .orange { color: #ffaa44; }
+
+  .progress-dots {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #2a2a6a;
+    transition: all 0.3s;
+  }
+  .dot.current { background: #4a6cf7; transform: scale(1.3); }
+  .dot.answered-correct { background: #44cc66; }
+  .dot.answered-wrong { background: #cc4444; }
+
+  .final-screen {
+    text-align: center;
+    padding: 40px;
+    display: none;
+  }
+  .final-screen h2 {
+    font-size: 2rem;
+    color: #fff;
+    margin-bottom: 15px;
+  }
+  .final-score {
+    font-size: 4rem;
+    font-weight: 700;
+    color: #4a6cf7;
+    margin-bottom: 10px;
+  }
+  .final-message {
+    font-size: 1.1rem;
+    color: #aaa;
+    margin-bottom: 30px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Spot the Bad Practice</h1>
+  <p class="subtitle">Read each research scenario and identify which questionable research practice is being described</p>
+
+  <div class="score-bar">
+    <div class="score-item">
+      <div class="score-num green" id="scoreCorrect">0</div>
+      <div class="score-label">Correct</div>
+    </div>
+    <div class="score-item">
+      <div class="score-num orange" id="scoreTotal">0 / 5</div>
+      <div class="score-label">Answered</div>
+    </div>
+  </div>
+
+  <div class="progress-dots" id="progressDots"></div>
+
+  <div id="quizArea"></div>
+
+  <div class="final-screen" id="finalScreen">
+    <h2>Quiz Complete!</h2>
+    <div class="final-score" id="finalScore"></div>
+    <div class="final-message" id="finalMessage"></div>
+    <button class="nav-btn primary" onclick="restartQuiz()">Try Again</button>
+  </div>
+</div>
+
+<script>
+const scenarios = [
+  {
+    text: "A research team measured 12 different cognitive outcomes in their brain stimulation study. Only the reaction time measure reached p = .03. In their paper, they reported only the reaction time finding, framing it as their primary hypothesis.",
+    options: ["P-hacking", "HARKing", "Publication bias", "Data fabrication"],
+    correct: 0,
+    correctFeedback: "This is <strong>p-hacking</strong> — specifically, measuring many outcomes but only reporting the one that reached significance. By testing 12 outcomes at \u03B1 = .05, the probability of at least one false positive is 1 \u2212 (0.95)\u00B9\u00B2 = 46%. The researchers should report all 12 measures and apply a correction for multiple comparisons.",
+    wrongFeedback: "Not quite. This is <strong>p-hacking</strong>. The researchers measured 12 outcomes but only reported the significant one, inflating their false positive rate. It also has elements of HARKing (presenting it as their primary hypothesis), but the core issue is selective reporting of multiple tests."
+  },
+  {
+    text: "A PhD student found that their memory experiment showed no significant effect of sleep deprivation on recall (p = .34). After looking at the data, they noticed that when they split participants by age, the older group showed a significant effect (p = .02). They rewrote their introduction to frame age-dependent memory effects as their main research question.",
+    options: ["P-hacking", "HARKing", "Publication bias", "Falsification"],
+    correct: 1,
+    correctFeedback: "This is <strong>HARKing</strong> (Hypothesising After the Results are Known). The student explored the data, found a post-hoc pattern, and then rewrote the paper to make it look like this was their prediction all along. The honest approach would be to report it as an exploratory finding and replicate it in a new study.",
+    wrongFeedback: "This is <strong>HARKing</strong> \u2014 Hypothesising After the Results are Known. The student discovered the age effect through exploration, but then presented it as if it had been predicted from the start. There's some overlap with p-hacking (subsetting the data), but the key issue is rewriting the hypothesis to match the results."
+  },
+  {
+    text: "A journal received two submissions testing whether a new anxiety therapy works. Study A found a significant positive effect (p = .01). Study B found no significant effect (p = .52). The journal published Study A and rejected Study B, saying the null result was 'not of sufficient interest to readers'.",
+    options: ["P-hacking", "HARKing", "Publication bias", "Low statistical power"],
+    correct: 2,
+    correctFeedback: "This is <strong>publication bias</strong> (also called the 'file drawer problem'). Journals preferentially publishing positive results means the published literature gives a distorted view of reality. Study B's null result is just as informative \u2014 the therapy might genuinely not work, and clinicians need to know that.",
+    wrongFeedback: "This is <strong>publication bias</strong>. The journal selectively publishes the positive finding and rejects the null result, creating a skewed literature. This is a systemic problem: if 20 labs test the same therapy and only the 1 that gets p < .05 gets published, the public sees a 'proven' treatment that might not work."
+  },
+  {
+    text: "A neuroscience lab's fMRI scanner was producing noisy data for two weeks. Rather than discarding those participants' data and noting the equipment issue, the PI told the research assistant to replace the noisy scans with data copied from other participants who had similar demographic profiles.",
+    options: ["P-hacking", "HARKing", "Publication bias", "Data fabrication / falsification"],
+    correct: 3,
+    correctFeedback: "This is <strong>data fabrication/falsification</strong> \u2014 the most serious form of research misconduct. Replacing real data with copied data from other participants is manufacturing false evidence. This constitutes research fraud and can lead to retraction, loss of funding, and career consequences. The correct approach is to exclude the affected data and report the equipment issue.",
+    wrongFeedback: "This is <strong>data fabrication/falsification</strong>. Copying data from other participants to replace problematic scans is manufacturing false results \u2014 this is outright scientific fraud. Unlike p-hacking or HARKing (which involve questionable but legal analytic choices), fabrication can lead to formal misconduct investigations."
+  },
+  {
+    text: "A team studying the effects of a cognitive training app planned to test 30 participants. After 18 participants, they checked the p-value and found p = .06. They recruited 8 more participants, checked again (p = .12), recruited 10 more, and finally got p = .04 with 36 participants. They reported a study with n = 36.",
+    options: ["P-hacking (optional stopping)", "HARKing", "Publication bias", "Low statistical power"],
+    correct: 0,
+    correctFeedback: "This is <strong>p-hacking through optional stopping</strong> \u2014 repeatedly checking significance and adding more participants until p < .05. Each interim check inflates the overall false positive rate well beyond 5%. The proper approach is to either pre-register a fixed sample size, or use sequential analysis methods that account for repeated testing.",
+    wrongFeedback: "This is <strong>p-hacking through optional stopping</strong>. The researchers kept collecting data and checking the p-value, stopping only when they hit significance. Each peek at the data inflates the false positive rate. With enough participants, random noise can eventually produce p < .05 even when there's no real effect."
+  }
+];
+
+let currentQ = 0;
+let score = 0;
+let answered = new Array(scenarios.length).fill(null); // null = unanswered, true/false
+
+function init() {
+  // Build dots
+  const dots = document.getElementById('progressDots');
+  dots.innerHTML = '';
+  for (let i = 0; i < scenarios.length; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'dot' + (i === 0 ? ' current' : '');
+    dot.id = `dot-${i}`;
+    dots.appendChild(dot);
+  }
+  showQuestion(0);
+}
+
+function showQuestion(idx) {
+  currentQ = idx;
+  const s = scenarios[idx];
+  const area = document.getElementById('quizArea');
+
+  // Update dots
+  document.querySelectorAll('.dot').forEach((d, i) => {
+    d.className = 'dot';
+    if (i === idx) d.classList.add('current');
+    if (answered[i] === true) d.classList.add('answered-correct');
+    if (answered[i] === false) d.classList.add('answered-wrong');
+  });
+
+  let html = `
+    <div class="scenario-card active">
+      <span class="scenario-number">${idx + 1}</span>
+      <div class="scenario-text">${s.text}</div>
+      <div class="options" id="options-${idx}">
+  `;
+  s.options.forEach((opt, oi) => {
+    const wasAnswered = answered[idx] !== null;
+    let cls = 'option-btn';
+    if (wasAnswered) {
+      if (oi === s.correct) cls += ' correct';
+      else if (answered[idx] === false && oi !== s.correct) cls += ' wrong';
+    }
+    const disabled = wasAnswered ? 'onclick=""' : `onclick="selectAnswer(${idx}, ${oi})"`;
+    html += `<button class="${cls}" ${disabled} ${wasAnswered ? 'style="pointer-events:none"' : ''}>${opt}</button>`;
+  });
+  html += `</div>`;
+
+  // Show feedback if already answered
+  if (answered[idx] !== null) {
+    const isCorrect = answered[idx];
+    html += `<div class="feedback show ${isCorrect ? 'correct-fb' : 'wrong-fb'}">${isCorrect ? s.correctFeedback : s.wrongFeedback}</div>`;
+  }
+
+  html += `</div>`;
+
+  // Navigation
+  html += `<div class="nav-buttons">`;
+  html += `<button class="nav-btn secondary" ${idx === 0 ? 'disabled' : ''} onclick="showQuestion(${idx - 1})">&#8592; Previous</button>`;
+  if (idx < scenarios.length - 1) {
+    html += `<button class="nav-btn primary" onclick="showQuestion(${idx + 1})">Next &#8594;</button>`;
+  } else if (answered.every(a => a !== null)) {
+    html += `<button class="nav-btn primary" onclick="showFinal()">See Results</button>`;
+  }
+  html += `</div>`;
+
+  area.innerHTML = html;
+}
+
+function selectAnswer(qIdx, optIdx) {
+  const s = scenarios[qIdx];
+  const isCorrect = optIdx === s.correct;
+  answered[qIdx] = isCorrect;
+  if (isCorrect) score++;
+
+  document.getElementById('scoreCorrect').textContent = score;
+  const totalAnswered = answered.filter(a => a !== null).length;
+  document.getElementById('scoreTotal').textContent = `${totalAnswered} / ${scenarios.length}`;
+
+  showQuestion(qIdx);
+}
+
+function showFinal() {
+  document.getElementById('quizArea').innerHTML = '';
+  const final = document.getElementById('finalScreen');
+  final.style.display = 'block';
+  document.getElementById('finalScore').textContent = `${score} / ${scenarios.length}`;
+
+  let msg = '';
+  if (score === scenarios.length) {
+    msg = "Perfect score! You can spot every questionable research practice. You're well-equipped to critically evaluate published research.";
+  } else if (score >= 3) {
+    msg = "Good job! You've got a solid understanding of questionable research practices. Review the ones you missed \u2014 the distinctions between p-hacking and HARKing can be subtle.";
+  } else {
+    msg = "These are tricky distinctions! The key thing to remember: <strong>p-hacking</strong> = manipulating analysis to find significance, <strong>HARKing</strong> = changing your hypothesis after seeing results, <strong>publication bias</strong> = systemic preference for positive results, <strong>fabrication</strong> = making up or altering data.";
+  }
+  document.getElementById('finalMessage').innerHTML = msg;
+}
+
+function restartQuiz() {
+  score = 0;
+  answered = new Array(scenarios.length).fill(null);
+  document.getElementById('scoreCorrect').textContent = '0';
+  document.getElementById('scoreTotal').textContent = '0 / 5';
+  document.getElementById('finalScreen').style.display = 'none';
+  init();
+}
+
+init();
+</script>
+</body>
+</html>
