@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Garden of Forking Paths — Open Science Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #0c0f1a;
+    --bg-secondary: #141829;
+    --bg-card: #1a1f35;
+    --bg-card-hover: #1e2440;
+    --border: rgba(255,255,255,0.06);
+    --border-active: rgba(99,102,241,0.4);
+    --text-primary: #f1f3f9;
+    --text-secondary: #8b92ab;
+    --text-muted: #5c6380;
+    --accent: #6366f1;
+    --accent-light: #818cf8;
+    --accent-glow: rgba(99,102,241,0.15);
+    --danger: #ef4444;
+    --danger-soft: rgba(239,68,68,0.12);
+    --danger-border: rgba(239,68,68,0.25);
+    --safe: #3b82f6;
+    --safe-soft: rgba(59,130,246,0.12);
+    --safe-border: rgba(59,130,246,0.25);
+    --success: #10b981;
+    --success-soft: rgba(16,185,129,0.12);
+    --success-border: rgba(16,185,129,0.25);
+    --warning: #f59e0b;
+    --warning-soft: rgba(245,158,11,0.12);
+    --warning-border: rgba(245,158,11,0.2);
+    --radius: 16px;
+    --radius-sm: 10px;
+    --radius-xs: 6px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background:
+      radial-gradient(ellipse 80% 60% at 30% 10%, rgba(99,102,241,0.07), transparent),
+      radial-gradient(ellipse 60% 50% at 70% 90%, rgba(245,158,11,0.04), transparent);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 32px 24px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Header */
+  .header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .header-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent-glow);
+    border: 1px solid var(--border-active);
+    border-radius: 100px;
+    padding: 6px 16px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--accent-light);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    background: linear-gradient(135deg, #f1f3f9 0%, #818cf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 10px;
+  }
+  .subtitle {
+    color: var(--text-secondary);
+    font-size: 1.05rem;
+    max-width: 620px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+
+  /* Scenario intro */
+  .scenario-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    margin-bottom: 28px;
+    border-left: 3px solid var(--accent);
+  }
+  .scenario-box h2 {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+  }
+  .scenario-box p {
+    font-size: 0.95rem;
+    line-height: 1.75;
+    color: var(--text-secondary);
+  }
+  .scenario-box em { color: var(--accent-light); font-style: normal; font-weight: 600; }
+
+  /* Progress steps */
+  .step-progress {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin-bottom: 28px;
+    align-items: center;
+  }
+  .step-dot {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 2px solid rgba(255,255,255,0.08);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    transition: all 0.3s ease;
+  }
+  .step-dot.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 0 16px rgba(99,102,241,0.35);
+    transform: scale(1.1);
+  }
+  .step-dot.done {
+    border-color: var(--success);
+    background: var(--success-soft);
+    color: var(--success);
+  }
+  .step-connector {
+    width: 24px;
+    height: 2px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 1px;
+  }
+  .step-connector.done { background: var(--success); opacity: 0.4; }
+
+  /* Decision card */
+  .decision-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    margin-bottom: 20px;
+    animation: fadeUp 0.35s ease;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .decision-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+  .decision-question {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
+  .decision-context {
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin-bottom: 24px;
+  }
+
+  .choice-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 560px) {
+    .choice-buttons { grid-template-columns: 1fr; }
+  }
+
+  .choice-btn {
+    padding: 20px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+    line-height: 1.5;
+  }
+  .choice-btn:hover {
+    border-color: var(--border-active);
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  }
+  .choice-btn .choice-label {
+    display: block;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+    font-size: 0.95rem;
+  }
+  .choice-btn .choice-detail {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  .choice-btn.selected {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+    color: var(--accent-light);
+  }
+  .choice-btn.selected .choice-label { color: var(--accent-light); }
+  .choice-btn.selected .choice-detail { color: var(--accent-light); opacity: 0.7; }
+
+  /* Result screen */
+  .result-screen {
+    display: none;
+    animation: fadeUp 0.5s ease;
+  }
+
+  .your-result {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .your-result h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: var(--text-secondary);
+  }
+  .p-value-display {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 3.5rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+    line-height: 1;
+  }
+  .p-value-display.significant { color: var(--danger); }
+  .p-value-display.not-significant { color: var(--safe); }
+  .p-verdict {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+  .p-verdict.sig { color: var(--danger); }
+  .p-verdict.ns { color: var(--safe); }
+
+  .your-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 16px;
+  }
+  .your-choice-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+
+  /* All paths map */
+  .all-paths {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    margin-bottom: 24px;
+  }
+  .all-paths h2 {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+  }
+  .all-paths .summary-line {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    line-height: 1.6;
+  }
+  .all-paths .summary-line strong { color: var(--warning); }
+
+  .paths-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 20px;
+  }
+  .path-cell {
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-xs);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.55rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+  }
+  .path-cell.sig {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid var(--danger-border);
+  }
+  .path-cell.ns {
+    background: var(--safe-soft);
+    color: var(--safe);
+    border: 1px solid var(--safe-border);
+  }
+  .path-cell.yours {
+    box-shadow: 0 0 0 2px var(--warning), 0 0 12px rgba(245,158,11,0.3);
+    transform: scale(1.15);
+    z-index: 2;
+  }
+  .path-cell:hover {
+    transform: scale(1.2);
+    z-index: 3;
+  }
+
+  .path-tooltip {
+    display: none;
+    position: fixed;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px 18px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    z-index: 100;
+    max-width: 280px;
+    pointer-events: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .path-tooltip.visible { display: block; }
+  .path-tooltip strong { color: var(--text-primary); }
+
+  /* Stats bar */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  @media (max-width: 560px) {
+    .stats-row { grid-template-columns: 1fr; }
+  }
+  .stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    text-align: center;
+  }
+  .stat-number {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .stat-label {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* Explanation */
+  .explanation {
+    padding: 24px;
+    background: rgba(245,158,11,0.04);
+    border-radius: var(--radius);
+    border: 1px solid var(--warning-border);
+    font-size: 0.9rem;
+    line-height: 1.75;
+    color: var(--text-secondary);
+    margin-bottom: 24px;
+  }
+  .explanation strong { color: var(--warning); }
+
+  /* Buttons */
+  .btn-row {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    padding: 12px 28px;
+    border-radius: var(--radius-sm);
+    border: none;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 2px 12px rgba(99,102,241,0.25);
+  }
+  .btn-primary:hover {
+    background: var(--accent-light);
+    transform: translateY(-1px);
+  }
+  .btn-secondary {
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { color: var(--text-primary); background: var(--bg-card-hover); }
+
+  .hidden { display: none; }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    margin-top: 40px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+  .footer a { color: var(--accent-light); text-decoration: none; }
+  .footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="header-badge">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12"/><path d="M18 9a3 3 0 100-6 3 3 0 000 6z"/><path d="M6 21a3 3 0 100-6 3 3 0 000 6z"/><path d="M18 9c0 4-6 8-12 8"/></svg>
+      Interactive Exploration
+    </div>
+    <h1>The Garden of<br>Forking Paths</h1>
+    <p class="subtitle">Same dataset. Different analysis choices. How many paths lead to a "significant" result?</p>
+  </div>
+
+  <div class="scenario-box">
+    <h2>Your dataset</h2>
+    <p>You're analysing data from a study on whether <em>6 weeks of mindfulness meditation</em> increases <em>hippocampal grey matter volume</em>. You have MRI scans from 48 participants (24 meditation, 24 control). The raw data are ambiguous — there's a hint of an effect, but it's noisy. Now you need to make five analysis decisions before you can report a p-value. Each choice is defensible. None is "wrong." But they lead to very different conclusions.</p>
+  </div>
+
+  <div class="step-progress" id="stepProgress"></div>
+
+  <div id="decisionArea"></div>
+
+  <div class="result-screen" id="resultScreen">
+    <div class="your-result" id="yourResult">
+      <h2>Your analysis path produced</h2>
+      <div class="p-value-display" id="pValueDisplay"></div>
+      <div class="p-verdict" id="pVerdict"></div>
+      <div class="your-choices" id="yourChoices"></div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-number" style="color: var(--danger);" id="statSig">0</div>
+        <div class="stat-label">Paths → p &lt; .05</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" style="color: var(--safe);" id="statNS">0</div>
+        <div class="stat-label">Paths → p ≥ .05</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" style="color: var(--warning);" id="statRate">0%</div>
+        <div class="stat-label">Significant rate</div>
+      </div>
+    </div>
+
+    <div class="all-paths" id="allPathsSection">
+      <h2>All 32 analysis paths</h2>
+      <p class="summary-line" id="summaryLine"></p>
+      <div class="paths-grid" id="pathsGrid"></div>
+    </div>
+
+    <div class="explanation">
+      <strong>This is the Garden of Forking Paths.</strong> The term comes from statistician Andrew Gelman. Even without any intention to cheat, the flexibility in data analysis means that many defensible pipelines exist for the same dataset. If a researcher (consciously or not) tries a few different approaches and reports the one that "works," the published p-value no longer means what it claims to. This is why <strong>pre-registration</strong> matters — it locks in analysis decisions <em>before</em> seeing the data, closing off the forking paths.
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="restart()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+        Try different choices
+      </button>
+      <button class="btn btn-secondary" onclick="randomWalk()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 8l-8 8"/><circle cx="8" cy="8" r="1.5"/><circle cx="16" cy="16" r="1.5"/></svg>
+        Random path
+      </button>
+    </div>
+  </div>
+
+  <div class="path-tooltip" id="tooltip"></div>
+
+  <div class="footer">
+    Open Science Lab &middot; University of Cambridge &middot; <a href="https://github.com/marcellamontagnese/teaching-open-science-lab">View on GitHub</a>
+  </div>
+</div>
+
+<script>
+// ── Decision points ──
+const decisions = [
+  {
+    label: "Decision 1 of 5",
+    question: "How do you handle outliers?",
+    context: "Three participants have hippocampal volumes >2.5 SD from the group mean. One is in the meditation group, two are in the control group.",
+    options: [
+      { label: "Keep all participants", detail: "Preserve the full dataset — removing data points could introduce bias" },
+      { label: "Exclude outliers (>2.5 SD)", detail: "Standard neuroimaging practice — extreme values may reflect scan artefacts" }
+    ],
+    shortLabels: ["Keep outliers", "Exclude outliers"]
+  },
+  {
+    label: "Decision 2 of 5",
+    question: "Do you transform the data?",
+    context: "Hippocampal volume data are slightly right-skewed (skewness = 0.8). A log-transform would improve normality.",
+    options: [
+      { label: "Use raw volumes", detail: "Easier to interpret — the skew is mild enough that parametric tests should be robust" },
+      { label: "Log-transform volumes", detail: "Better satisfies normality assumptions and reduces the influence of extreme values" }
+    ],
+    shortLabels: ["Raw data", "Log-transform"]
+  },
+  {
+    label: "Decision 3 of 5",
+    question: "Which covariates do you include?",
+    context: "Age and total intracranial volume (TIV) are known to affect hippocampal volume. Including them increases precision but costs degrees of freedom.",
+    options: [
+      { label: "No covariates (simple comparison)", detail: "Straightforward two-group comparison — fewer assumptions, more power if covariates are weak" },
+      { label: "Control for age + TIV", detail: "Standard practice in structural MRI studies — isolates the meditation effect from confounds" }
+    ],
+    shortLabels: ["No covariates", "Age + TIV"]
+  },
+  {
+    label: "Decision 4 of 5",
+    question: "Which participants do you include?",
+    context: "In the meditation group, 5 out of 24 participants attended fewer than 75% of sessions. They technically received the intervention, but the \"dose\" was low.",
+    options: [
+      { label: "Include everyone (intention-to-treat)", detail: "Preserves randomisation and avoids post-hoc selection — the gold standard for trials" },
+      { label: "Only high-adherence (≥75%)", detail: "Tests the effect of actually doing meditation, not just being assigned to it" }
+    ],
+    shortLabels: ["All participants", "High-adherence only"]
+  },
+  {
+    label: "Decision 5 of 5",
+    question: "Which statistical test?",
+    context: "You could use a parametric test (independent-samples t-test or ANCOVA depending on covariates) or a non-parametric alternative (permutation test).",
+    options: [
+      { label: "Parametric test", detail: "More powerful if assumptions hold — t-test without covariates, ANCOVA with covariates" },
+      { label: "Permutation test", detail: "Assumption-free — shuffles group labels 10,000 times to build the null distribution" }
+    ],
+    shortLabels: ["Parametric", "Permutation"]
+  }
+];
+
+// ── Pre-computed p-values for all 32 paths ──
+// Binary encoding: 0 = option A, 1 = option B for each decision
+// [outliers, transform, covariates, inclusion, test]
+// Designed so ~11/32 paths are significant — realistic researcher degrees of freedom
+const pathPValues = {
+  "00000": 0.106, "00001": 0.112, "00010": 0.071, "00011": 0.079,
+  "00100": 0.079, "00101": 0.069, "00110": 0.049, "00111": 0.063,
+  "01000": 0.098, "01001": 0.105, "01010": 0.060, "01011": 0.068,
+  "01100": 0.065, "01101": 0.060, "01110": 0.030, "01111": 0.037,
+  "10000": 0.073, "10001": 0.089, "10010": 0.044, "10011": 0.054,
+  "10100": 0.036, "10101": 0.043, "10110": 0.006, "10111": 0.024,
+  "11000": 0.067, "11001": 0.081, "11010": 0.033, "11011": 0.045,
+  "11100": 0.021, "11101": 0.036, "11110": 0.003, "11111": 0.003
+};
+
+let currentStep = 0;
+let choices = [];
+
+function buildStepProgress() {
+  const el = document.getElementById('stepProgress');
+  let html = '';
+  for (let i = 0; i < 5; i++) {
+    if (i > 0) {
+      html += '<div class="step-connector' + (i <= currentStep ? '' : '') + (choices.length > i ? ' done' : '') + '"></div>';
+    }
+    let cls = 'step-dot';
+    if (i === currentStep && choices.length < 5) cls += ' active';
+    else if (i < choices.length) cls += ' done';
+    html += '<div class="' + cls + '">' + (i < choices.length ? '✓' : (i + 1)) + '</div>';
+  }
+  el.innerHTML = html;
+}
+
+function showDecision(idx) {
+  currentStep = idx;
+  buildStepProgress();
+  const d = decisions[idx];
+  const area = document.getElementById('decisionArea');
+
+  let html = '<div class="decision-card">';
+  html += '<div class="decision-label">' + d.label + '</div>';
+  html += '<div class="decision-question">' + d.question + '</div>';
+  html += '<div class="decision-context">' + d.context + '</div>';
+  html += '<div class="choice-buttons">';
+  d.options.forEach((opt, oi) => {
+    html += '<button class="choice-btn" onclick="makeChoice(' + idx + ',' + oi + ')">';
+    html += '<span class="choice-label">' + opt.label + '</span>';
+    html += '<span class="choice-detail">' + opt.detail + '</span>';
+    html += '</button>';
+  });
+  html += '</div></div>';
+  area.innerHTML = html;
+}
+
+function makeChoice(step, option) {
+  choices[step] = option;
+
+  if (step < 4) {
+    showDecision(step + 1);
+  } else {
+    showResult();
+  }
+}
+
+function showResult() {
+  document.getElementById('decisionArea').innerHTML = '';
+  currentStep = 5;
+  buildStepProgress();
+
+  const key = choices.join('');
+  const pVal = pathPValues[key];
+  const isSig = pVal < 0.05;
+
+  // Your result
+  const display = document.getElementById('pValueDisplay');
+  display.textContent = 'p = ' + pVal.toFixed(3);
+  display.className = 'p-value-display ' + (isSig ? 'significant' : 'not-significant');
+
+  const verdict = document.getElementById('pVerdict');
+  verdict.textContent = isSig ? '✗ "Significant" at α = .05' : '✓ Not significant at α = .05';
+  verdict.className = 'p-verdict ' + (isSig ? 'sig' : 'ns');
+
+  // Show chosen path
+  const tagsEl = document.getElementById('yourChoices');
+  tagsEl.innerHTML = choices.map((c, i) => '<span class="your-choice-tag">' + decisions[i].shortLabels[c] + '</span>').join('');
+
+  // Compute all paths
+  const allKeys = Object.keys(pathPValues);
+  let sigCount = 0;
+  allKeys.forEach(k => { if (pathPValues[k] < 0.05) sigCount++; });
+  const nsCount = allKeys.length - sigCount;
+  const sigRate = ((sigCount / allKeys.length) * 100).toFixed(0);
+
+  document.getElementById('statSig').textContent = sigCount;
+  document.getElementById('statNS').textContent = nsCount;
+  document.getElementById('statRate').textContent = sigRate + '%';
+
+  document.getElementById('summaryLine').innerHTML = 'From the same dataset, <strong>' + sigCount + ' out of 32</strong> defensible analysis paths produce a statistically significant result. Your path is highlighted in gold.';
+
+  // Build grid
+  const grid = document.getElementById('pathsGrid');
+  grid.innerHTML = '';
+  allKeys.sort();
+  allKeys.forEach(k => {
+    const p = pathPValues[k];
+    const s = p < 0.05;
+    const isYours = k === key;
+    const cell = document.createElement('div');
+    cell.className = 'path-cell ' + (s ? 'sig' : 'ns') + (isYours ? ' yours' : '');
+    cell.textContent = p < 0.01 ? p.toFixed(3) : '.' + (p * 1000).toFixed(0).padStart(3, '0');
+
+    cell.addEventListener('mouseenter', (e) => showTooltip(e, k, p));
+    cell.addEventListener('mousemove', (e) => moveTooltip(e));
+    cell.addEventListener('mouseleave', hideTooltip);
+
+    grid.appendChild(cell);
+  });
+
+  document.getElementById('resultScreen').style.display = 'block';
+}
+
+function showTooltip(e, pathKey, pVal) {
+  const tip = document.getElementById('tooltip');
+  const choiceList = pathKey.split('').map((c, i) => decisions[i].shortLabels[parseInt(c)]).join(' → ');
+  const isSig = pVal < 0.05;
+  tip.innerHTML = '<strong>p = ' + pVal.toFixed(3) + '</strong> ' + (isSig ? '(significant)' : '(not significant)') + '<br>' + choiceList;
+  tip.classList.add('visible');
+  moveTooltip(e);
+}
+
+function moveTooltip(e) {
+  const tip = document.getElementById('tooltip');
+  const x = e.clientX + 12;
+  const y = e.clientY - 10;
+  // Keep tooltip on screen
+  const maxX = window.innerWidth - 300;
+  tip.style.left = Math.min(x, maxX) + 'px';
+  tip.style.top = y + 'px';
+}
+
+function hideTooltip() {
+  document.getElementById('tooltip').classList.remove('visible');
+}
+
+function restart() {
+  choices = [];
+  currentStep = 0;
+  document.getElementById('resultScreen').style.display = 'none';
+  showDecision(0);
+}
+
+function randomWalk() {
+  choices = [];
+  for (let i = 0; i < 5; i++) choices.push(Math.random() < 0.5 ? 0 : 1);
+  currentStep = 5;
+  buildStepProgress();
+  document.getElementById('decisionArea').innerHTML = '';
+  showResult();
+}
+
+// Init
+showDecision(0);
+</script>
+</body>
+</html>
