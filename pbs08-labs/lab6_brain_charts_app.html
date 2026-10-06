@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brain Charts app – PBS08</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .bigbtn { display: inline-block; text-decoration: none; font-size: 19px; padding: 12px 22px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin: 10px 0 4px; }
+  .fact { background: var(--pink-soft); border: 1px solid var(--grid); border-radius: 8px; padding: 9px 12px; }
+  .fact b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .fact span { font-size: 14px; color: var(--muted); }
+  ul.plain { margin: 6px 0 0; padding-left: 20px; } ul.plain li { margin-bottom: 4px; }
+  .conv { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; align-items: start; }
+  @media (max-width: 760px) { .conv { grid-template-columns: minmax(0, 1fr); } }
+  .big { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--coral-ink); }
+  .step { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0; }
+  .step i { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--coral); color: var(--btn-ink); font-style: normal; font-weight: 800; display: grid; place-items: center; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="root">
+  <noscript><p class="callout">These labs need JavaScript. Please enable it and reload.</p></noscript>
+</div>
+<script src="shared.js"></script>
+<script>
+(function () {
+  const { h, f } = PBS;
+  const root = document.getElementById('root');
+  const APP = 'https://brainchart.io';
+
+  root.append(
+    h('h1', {}, 'Brain Charts app: the real lifespan charts'),
+    h('p', { class: 'sub' }, 'The reference in Lab 5 was made up. This one is real: lifespan brain charts built from about a hundred studies and shared as a free web app. In this lab you predict what the charts will look like, then go and check.'),
+    h('div', { class: 'callout' }, 'This lab happens on another website. Open the app in a second tab and keep this page beside it. Nothing you do on this page is saved, and the app is run by the Lifespan Brain Chart Consortium, not by this course.'),
+    h('div', { class: 'row', style: { marginBottom: '22px' } }, h('a', { class: 'btn bigbtn', href: APP, target: '_blank', rel: 'noopener' }, 'Open the Brain Charts app ↗'),
+      h('span', { class: 'small' }, 'brainchart.io. If the app is slow or down, do the predictions here and the checks later.')));
+
+  /* ---------------------------------------------------------------- what it is */
+  root.append(PBS.card('What you are about to use',
+    h('div', {},
+      h('p', { style: { marginTop: 0 } }, 'The charts come from Bethlehem, Seidlitz, White and colleagues (Nature, 2022). Like the growth charts for height, they give the expected value of a brain measure at each age, and the centile lines around it. The paper describes the web app as a way to explore the fitted models and to derive centile scores for new data.'),
+      h('div', { class: 'facts' },
+        h('div', { class: 'fact' }, h('b', {}, '123,984'), h('span', {}, 'MRI scans in the paper’s reference sample')),
+        h('div', { class: 'fact' }, h('b', {}, '≈ 100'), h('span', {}, 'studies pooled, each on its own scanners')),
+        h('div', { class: 'fact' }, h('b', {}, '0 to 100 years'), h('span', {}, 'from mid-gestation to 100 postnatal years'))),
+      h('p', { style: { margin: '10px 0 4px' } }, h('b', {}, 'Measures charted in the paper: '), 'total grey matter volume, white matter volume, subcortical grey matter volume, ventricular volume, total cerebrum volume, total surface area, mean cortical thickness, and regional volumes for 34 cortical areas.'),
+      h('p', { class: 'small', style: { marginBottom: 0 } }, 'Study and scanner differences are handled with random effects in a GAMLSS model (the same model family as the growth charts for height). For new data, the paper describes estimating a study-specific offset, which is the same idea as the correction in Lab 3.'))));
+
+  /* ---------------------------------------------------------------- tasks */
+  const tasks = h('div', { class: 'tasks', style: { marginTop: '22px' } },
+    h('h2', {}, 'Guided tasks'),
+    PBS.task({ tag: 'Predict', title: '1. Before you look: which of these three volumes reaches its peak earliest in life?',
+      body: '<p class="small">Think about what a brain does in the first years of life, and about how long myelination of white matter goes on.</p>',
+      options: [{ t: 'Total grey matter volume', ok: true, fb: 'The paper reports grey matter volume peaking at about 6 years, subcortical grey matter at about 14 years and white matter volume only at about 29 years. Now go and find the three peaks yourself in the app, and note how close you can read them off.' },
+        { t: 'Subcortical grey matter volume', fb: 'The paper reports this peaking in adolescence, at about 14 years. Grey matter volume peaks earlier, at about 6 years.' },
+        { t: 'White matter volume', fb: 'White matter volume keeps growing for decades. The paper reports its peak at about 29 years, the latest of the three.' }] }),
+    PBS.doTask({ tag: 'Check in the app', title: '2. Find the three peaks',
+      doit: '<b>Do this:</b> in the app, choose total grey matter volume and look at the median line (the 50th centile). Read off the age at which it peaks. Repeat for subcortical grey matter and for white matter.',
+      reveal: 'You should find a clear early peak for total grey matter, a later one for subcortical grey matter and a much later one for white matter. A trajectory is not a straight line: a single “effect of age” number hides all of this, which is one reason for fitting charts rather than a regression slope.' }),
+    PBS.doTask({ tag: 'Check in the app', title: '3. Read the spread, not only the middle',
+      doit: '<b>Do this:</b> for one measure, read the median and the 5th and 95th centile lines at age 10, 30 and 70. For each age, subtract the 5th from the 95th. Is the band equally wide at every age?',
+      reveal: 'The models let the spread vary with age (they are fitted for more than the median). That is why a z-score must be taken relative to the spread <i>at that age</i>, which is what Lab 5 showed. Note also where the lines look less smooth or the bands widen: that is usually where there are fewer data.' }),
+    PBS.doTask({ tag: 'Convert', title: '4. From a centile to a z-score and back',
+      doit: '<b>Do this:</b> take any centile the app gives you and enter it in the converter below. Then check it against the centile reader in Lab 5.',
+      reveal: 'For a Gaussian reference the two scales carry the same information: z = 0 is the 50th centile, z = 1 about the 84th, z = 2 about the 98th. For skewed measures the charts use other distributions, so the centile is the safer thing to report and the z-score is derived from it.' }));
+  root.append(tasks);
+
+  /* converter */
+  const cs = PBS.slider({ label: 'Centile', min: 0.5, max: 99.5, step: 0.5, value: 90, fmt: (v) => f(v, 1) + 'th' });
+  const zout = h('div', { class: 'big' }), ztxt = h('p', { class: 'small', style: { margin: '4px 0 0' } });
+  const host = h('div', {});
+  let ch = null;
+  function draw() {
+    const p = cs.get(), z = PBS.normInv(p / 100);
+    zout.textContent = 'z = ' + f(z, 2);
+    ztxt.textContent = z >= 0 ? 'The value is ' + f(z, 2) + ' standard deviations above the median for that age (the median is the 50th centile).' : 'The value is ' + f(-z, 2) + ' standard deviations below the median for that age (the median is the 50th centile).';
+    PBS.clear(host);
+    ch = PBS.chart(host, { w: 560, h: 260, m: { l: 20, r: 14, t: 12, b: 44 }, xd: [-3.5, 3.5], yd: [0, 0.45], xt: [-3, -2, -1, 0, 1, 2, 3], yt: [], xfmt: (v) => (v < 0 ? '−' + (-v) : String(v)), xlabel: 'z-score', yaxis: false, label: 'Normal curve with the area below the chosen centile shaded' });
+    const g = ch.layer(); let d = '', a = '';
+    for (let x = -3.5; x <= 3.5001; x += 0.05) { d += (d ? 'L' : 'M') + ch.x(x) + ' ' + ch.y(PBS.normPdf(x)); }
+    for (let x = -3.5; x <= z + 1e-9; x += 0.05) a += (a ? 'L' : 'M') + ch.x(x) + ' ' + ch.y(PBS.normPdf(x));
+    if (a) g.append(PBS.s('path', { d: a + 'L' + ch.x(Math.min(z, 3.5)) + ' ' + ch.y(0) + 'L' + ch.x(-3.5) + ' ' + ch.y(0) + 'Z', fill: 'var(--coral)', opacity: 0.4 }));
+    g.append(PBS.s('path', { d, fill: 'none', stroke: 'var(--ink)', 'stroke-width': 2 }));
+    g.append(PBS.s('line', { x1: ch.x(z), x2: ch.x(z), y1: ch.y(0), y2: ch.y(PBS.normPdf(z)), stroke: 'var(--coral-ink)', 'stroke-width': 2.4 }));
+  }
+  cs.input.addEventListener('input', draw);
+  root.append(h('div', { style: { marginTop: '14px' } }, PBS.card('Centile and z-score converter', h('div', { class: 'conv' }, h('div', {}, host), h('div', {}, cs, zout, ztxt)))));
+
+  /* discussion */
+  root.append(h('div', { class: 'tasks', style: { marginTop: '14px' } },
+    h('details', { class: 'more' }, h('summary', {}, '5. Questions to take back to the lecture'),
+      h('div', { style: { marginTop: '6px' } }, h('ul', { class: 'plain' },
+        h('li', { html: 'Which measure would you least like to use at age 2, or at age 95, and why? <span class="small">(Think about how many people the chart has seen at that age.)</span>' }),
+        h('li', { html: 'Your own scans come from one scanner that is not in the reference. What happens to every centile if that scanner makes grey matter look 3% smaller? <span class="small">(Lab 3 and Case H in Lab 7.)</span>' }),
+        h('li', { html: 'A centile of 3 in a 70-year-old: what do you know, and what do you not know? <span class="small">(Lab 7 and Lecture 6.)</span>' }),
+        h('li', { html: 'Who is, and is not, in the reference sample? Compare your answer with the limitations the authors discuss in the paper.' })))),
+    h('details', { class: 'more' }, h('summary', {}, 'If you use the charts or the app in your own work'),
+      h('div', { style: { marginTop: '6px' }, html: '<p>The consortium asks users to cite the original paper (Bethlehem, Seidlitz, White et al., <i>Nature</i>, 2022) or to include the Lifespan Brain Chart Consortium as a co-author. The code repository (github.com/brainchart/Lifespan) is licensed CC BY-NC-ND 4.0, so read the terms before reusing anything from it.</p>' }))));
+
+  root.append(PBS.takeaway([
+    'A brain chart gives the expected value, and the spread, of a brain measure at every age, not a single “effect of age”.',
+    'Different tissues follow different trajectories: grey matter volume peaks in childhood and white matter volume in the third decade.',
+    'The output of the app is a centile; a z-score is a convenient re-expression of it, and the two carry the same information for a Gaussian reference.',
+    'Charts built on many scanners still need a correction when your data come from a scanner they have not seen.']));
+  root.append(h('p', { class: 'src', html: 'Bethlehem, R. A. I., Seidlitz, J., White, S. R., et al. (2022). Brain charts for the human lifespan. <i>Nature</i>, 604, 525–533. Web app: brainchart.io. Figures quoted here (reference sample size, peak ages) are as reported in the paper; check them against the paper and the app when you cite them. The converter on this page is a teaching tool, not part of the app.' }));
+
+  PBS.frame('brainapp', root);
+  draw();
+  window.__lab = { draw, cs };
+})();
+</script>
+</body>
+</html>

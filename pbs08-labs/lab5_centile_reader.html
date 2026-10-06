@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Centile reader – PBS08</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  svg.draggable { touch-action: pan-y; cursor: ew-resize; }
+  .lab5 { display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: min-content 1fr; gap: 20px; align-items: start; grid-template-areas: "chart side" "table side"; margin-bottom: 26px; }
+  .lab5 > .a-chart { grid-area: chart; } .lab5 > .a-side { grid-area: side; } .lab5 > .a-table { grid-area: table; }
+  @media (max-width: 920px) { .lab5 { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; grid-template-areas: "chart" "side" "table"; } }
+  .formula { font-size: 18px; font-variant-numeric: tabular-nums; }
+  .formula b { color: var(--coral-ink); }
+  .seg.chips { border: 0; gap: 6px; border-radius: 0; overflow: visible; }
+  .seg.chips button { border: 1.5px solid var(--rose); border-radius: 8px; }
+  .seg.chips button:last-child { border-right: 1.5px solid var(--rose); }
+  .score { display: inline-block; background: var(--pink); border-radius: 99px; padding: 2px 14px; font-weight: 800; margin-left: 8px; font-size: 16px; }
+  .numfield { font: inherit; font-weight: 800; padding: 5px 9px; width: 6.5em; border: 1.5px solid var(--rose); border-radius: 8px; background: var(--card); color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="wrap" id="root">
+  <noscript><p class="callout">These labs need JavaScript. Please enable it and reload.</p></noscript>
+</div>
+<script src="shared.js"></script>
+<script>
+(function () {
+  const { h, s, f } = PBS;
+  const root = document.getElementById('root');
+
+  /* ---------------------------------------------------------------- the two simulated reference measures */
+  const SIGMA = 0.5;
+  const MODES = {
+    sym: { name: 'Hippocampal volume (symmetric reference)', short: 'Hippocampal volume', lo: 1.5, hi: 5.5, step: 0.05, def: 3.4, xt: [2, 3, 4, 5], d: 2,
+      mean: (a) => 4.0 - 0.016 * (a - 20), sd: () => SIGMA,
+      pdf: (x, a) => PBS.normPdf((x - 4.0 + 0.016 * (a - 20)) / SIGMA) / SIGMA,
+      cdf: (x, a) => PBS.normCdf((x - 4.0 + 0.016 * (a - 20)) / SIGMA) },
+    skew: { name: 'Ventricular volume (skewed reference)', short: 'Ventricular volume', lo: 0, hi: 90, step: 1, def: 8, xt: [0, 20, 40, 60, 80], d: 0,
+      mean: (a) => 20 + 0.4 * (a - 20), sd: (a) => 0.5 * (20 + 0.4 * (a - 20)),
+      pdf: (x, a) => { if (x <= 0) return 0; const m = 20 + 0.4 * (a - 20), sl2 = Math.log(1 + 0.25), ml = Math.log(m) - sl2 / 2, sl = Math.sqrt(sl2); return PBS.normPdf((Math.log(x) - ml) / sl) / (sl * x); },
+      cdf: (x, a) => { if (x <= 0) return 0; const m = 20 + 0.4 * (a - 20), sl2 = Math.log(1 + 0.25), ml = Math.log(m) - sl2 / 2, sl = Math.sqrt(sl2); return PBS.normCdf((Math.log(x) - ml) / sl); } },
+  };
+  const S = { mode: 'sym', age: 20, x: 3.4, N: 100, thr: 'b', brain: 1 };
+  const THR = { a: { q: 0.10, z: 1.645, label: 'Outside the 5th–95th centiles (10%)' }, b: { q: 0.05, z: 1.96, label: 'Outside the 2.5th–97.5th (5%)' }, c: { q: 0.01, z: 2.576, label: 'Outside the 0.5th–99.5th (1%)' } };
+  const M = () => MODES[S.mode];
+  const zOf = () => (S.x - M().mean(S.age)) / M().sd(S.age);
+
+  /* ---------------------------------------------------------------- page */
+  root.append(
+    h('h1', {}, 'Centile reader'),
+    h('p', { class: 'sub' }, 'A z-score and a centile are two ways of saying where one person sits among healthy people of the same age and sex. Drag the measurement and watch both.'),
+    h('div', { class: 'callout' }, 'The curve shows the measurements of healthy people. The shaded area to the left of your measurement is the share of healthy people who have a smaller value, which is your centile.'));
+
+  const chHost = h('div', {});
+  const stats = h('div', { class: 'stats', id: 'stats' });
+  const formula = h('div', { class: 'callout soft formula', id: 'formula', style: { marginBottom: '12px', marginTop: '12px' }, 'aria-live': 'polite' });
+  const picHost = h('div', { id: 'pic' });
+
+  const modeSeg = PBS.seg({ label: 'Reference', value: S.mode, options: [{ v: 'sym', label: 'Symmetric (hippocampus)' }, { v: 'skew', label: 'Skewed (ventricles)' }],
+    onChange: (v) => { S.mode = v; S.x = MODES[v].def; sl.set(S.x); setSliderRange(); update(); } });
+  modeSeg.classList.add('chips');
+  const ageSl = PBS.slider({ id: 'age', label: 'Age of the reference group (years)', min: 20, max: 70, step: 1, value: S.age, fmt: (v) => String(v), onInput: (v) => { S.age = v; update(); } });
+  const sl = PBS.slider({ id: 'xval', label: 'Measurement (mL)', min: M().lo, max: M().hi, step: M().step, value: S.x, fmt: (v) => f(v, M().d), onInput: (v) => { S.x = v; update(); } });
+  function setSliderRange() { sl.input.min = M().lo; sl.input.max = M().hi; sl.input.step = M().step; sl.set(S.x); }
+
+  const ctl = PBS.card('Controls', [h('div', { class: 'ctl' }, h('div', { class: 'lbl' }, h('span', {}, 'Which measure?')), modeSeg), ageSl, sl,
+    h('p', { class: 'small', style: { margin: 0 } }, 'You can also click or drag on the curve. The reference is simulated.')]);
+  const read = PBS.card('Readout', [stats, formula, picHost]);
+  const ageHost = h('div', { class: 'scroll-x' });
+  const ageCard = PBS.card('The same measurement at different ages', [h('p', { class: 'small' }, 'A raw value is hard to interpret on its own, because what is typical changes with age. Your current measurement is compared with the reference at five ages.'), ageHost]);
+  const chartCard = PBS.card('Reference distribution', [chHost]); chartCard.classList.add('a-chart'); ageCard.classList.add('a-table');
+  const side = h('div', { class: 'stack a-side' }, ctl, read);
+  root.append(h('div', { class: 'lab5' }, chartCard, side, ageCard));
+
+  const ch = PBS.chart(chHost, { w: 620, h: 400, m: { l: 58, r: 20, t: 22, b: 82 }, xd: [1.5, 5.5], yd: [0, 1], xt: [], yt: [], yaxis: false, xlabel: 'Measurement (mL, simulated)', label: 'Reference distribution with a movable measurement' });
+  ch.svg.classList.add('draggable');
+  let dragging = false;
+  const setFromEvent = (e) => { const p = ch.pointer(e); const m = M(); let v = Math.max(m.lo, Math.min(m.hi, p.x)); v = Math.round(v / m.step) * m.step; S.x = v; sl.set(v); update(); };
+  ch.svg.addEventListener('pointerdown', (e) => { dragging = true; try { ch.svg.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ } setFromEvent(e); });
+  ch.svg.addEventListener('pointermove', (e) => { if (dragging) setFromEvent(e); });
+  const stop = () => { dragging = false; };
+  ch.svg.addEventListener('pointerup', stop); ch.svg.addEventListener('pointercancel', stop);
+
+  /* the distribution chart has fixed axes per mode, so rebuild ticks when the mode changes */
+  let tickLayer = null;
+
+  function drawChart() {
+    const m = M(), a = S.age, mu = m.mean(a), sd = m.sd(a);
+    const xs = []; for (let i = 0; i <= 240; i++) xs.push(m.lo + (m.hi - m.lo) * i / 240);
+    const ys = xs.map((x) => m.pdf(x, a)), ymax = Math.max(...ys) * 1.18;
+    // rescale mapping for this draw
+    const X = (v) => ch.x((v - m.lo) / (m.hi - m.lo) * 4 + 1.5), Y = (v) => ch.m.t + ch.ih - v / ymax * ch.ih * 0.98;
+    const L = ch.layer(); const g = s('g', { 'clip-path': ch.clip }); L.append(g);
+    const curve = xs.map((x, i) => (i ? 'L' : 'M') + X(x).toFixed(1) + ' ' + Y(ys[i]).toFixed(1)).join('');
+    g.append(s('path', { d: curve + `L${X(m.hi)} ${Y(0)}L${X(m.lo)} ${Y(0)}Z`, fill: 'var(--pink-soft)' }));
+    const idx = xs.filter((x) => x <= S.x);
+    if (idx.length) {
+      const pts = idx.map((x, i) => (i ? 'L' : 'M') + X(x).toFixed(1) + ' ' + Y(m.pdf(x, a)).toFixed(1)).join('');
+      g.append(s('path', { d: pts + `L${X(S.x)} ${Y(m.pdf(S.x, a))}L${X(S.x)} ${Y(0)}L${X(idx[0])} ${Y(0)}Z`, fill: 'var(--coral)', 'fill-opacity': 0.5 }));
+    }
+    g.append(s('path', { d: curve, fill: 'none', stroke: 'var(--ink)', 'stroke-width': 2.2 }));
+    // mean marker
+    g.append(s('line', { x1: X(mu), x2: X(mu), y1: Y(0), y2: Y(m.pdf(mu, a)), stroke: 'var(--muted)', 'stroke-width': 1.4, 'stroke-dasharray': '4 3' }));
+    // x ticks (rebuilt each time because the scale differs per mode)
+    if (tickLayer) tickLayer.remove(); tickLayer = s('g', {}); ch.svg.append(tickLayer);
+    m.xt.forEach((t) => { tickLayer.append(s('line', { class: 'grid', x1: X(t), x2: X(t), y1: ch.m.t, y2: ch.m.t + ch.ih, style: 'opacity:.6' })); tickLayer.append(s('text', { class: 'tick', x: X(t), y: ch.m.t + ch.ih + 20, 'text-anchor': 'middle', text: f(t, 0) })); });
+    // z-score row
+    const zy = ch.m.t + ch.ih + 46;
+    tickLayer.append(s('text', { class: 'tick', x: ch.m.l - 26, y: zy + 4, 'text-anchor': 'end', text: 'z', style: 'font-weight:700' }));
+    for (let z = -3; z <= 3; z++) { const xv = mu + z * sd; if (xv < m.lo || xv > m.hi) continue; tickLayer.append(s('text', { class: 'tick', x: X(xv), y: zy + 4, 'text-anchor': 'middle', text: z < 0 ? '−' + (-z) : String(z), style: 'font-weight:700;fill:var(--coral-ink)' })); tickLayer.append(s('line', { x1: X(xv), x2: X(xv), y1: ch.m.t + ch.ih + 26, y2: zy - 10, stroke: 'var(--rose)', 'stroke-width': 1 })); }
+    // marker
+    const mx = X(S.x);
+    L.append(s('line', { x1: mx, x2: mx, y1: ch.m.t, y2: Y(0), stroke: 'var(--coral-ink)', 'stroke-width': 2.8 }));
+    L.append(s('circle', { cx: mx, cy: ch.m.t + 8, r: 9, fill: 'var(--coral)', stroke: 'var(--card)', 'stroke-width': 2.5 }));
+    const right = mx > ch.m.l + ch.iw - 60;
+    L.append(s('text', { class: 'note', x: right ? mx - 15 : mx + 15, y: ch.m.t + 13, 'text-anchor': right ? 'end' : 'start', text: 'you', style: 'font-weight:700' }));
+    L.append(s('text', { class: 'tick', x: X(mu) + 5, y: Y(m.pdf(mu, a)) - 6, text: 'mean', style: 'fill:var(--muted)' }));
+  }
+
+  function drawStats() {
+    const m = M(), z = zOf(), cNorm = PBS.normCdf(z) * 100, cTrue = m.cdf(S.x, S.age) * 100, mu = m.mean(S.age), sd = m.sd(S.age);
+    const fc = (v) => (v < 0.1 ? '< 0.1' : v > 99.9 ? '> 99.9' : f(v, 1)) + '%';
+    const tile = (k, v, c) => h('div', { class: 'stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v' + (c ? ' coral' : '') }, v));
+    PBS.clear(stats);
+    stats.append(tile('Expected at this age', f(mu, S.mode === 'sym' ? 2 : 1) + ' mL'), tile('z-score', f(z, 2), true));
+    if (S.mode === 'sym') stats.append(tile('Centile', fc(cNorm), true));
+    else stats.append(tile('Centile from z (normal curve)', fc(cNorm)), tile('True centile (skewed reference)', fc(cTrue), true));
+    const dd = S.mode === 'sym' ? 2 : 1;
+    formula.innerHTML = 'z = (' + f(S.x, dd) + ' − ' + f(mu, dd) + ') ÷ ' + f(sd, dd) + ' = <b>' + f(z, 2) + '</b>';
+    const k = Math.round(S.mode === 'sym' ? cNorm : cTrue);
+    PBS.clear(picHost);
+    const W = 200, cell = 18, svg = s('svg', { viewBox: `0 0 ${W} ${W + 8}`, class: 'chart', role: 'img', 'aria-label': k + ' of 100 healthy people have a smaller value', style: 'max-width:230px;margin:6px auto 0' });
+    for (let i = 0; i < 100; i++) {
+      const r = Math.floor(i / 10), c = i % 10;
+      svg.append(s('circle', { cx: 10 + c * cell, cy: 10 + r * cell, r: 6.6, fill: i < k ? 'var(--coral)' : 'var(--card)', stroke: i < k ? 'var(--coral)' : 'var(--rose)', 'stroke-width': 1.3 }));
+    }
+    picHost.append(svg, h('p', { class: 'small', style: { textAlign: 'center', margin: '2px 0 0' } }, 'Of 100 healthy people the same age, about ' + k + ' have a smaller value (filled).'));
+  }
+
+  /* ---------------------------------------------------------------- the same measurement at four ages */
+  function drawAges() {
+    PBS.clear(ageHost);
+    const m = M(), dd = S.mode === 'sym' ? 2 : 1;
+    const rows = [20, 35, 50, 65, 70].map((a) => { const z = (S.x - m.mean(a)) / m.sd(a); const c = m.cdf(S.x, a) * 100; return h('tr', {}, h('td', {}, String(a)), h('td', { class: 'n' }, f(m.mean(a), dd)), h('td', { class: 'n' }, f(m.sd(a), dd)), h('td', { class: 'n' }, f(z, 2)), h('td', { class: 'n' }, (c < 0.1 ? '< 0.1' : c > 99.9 ? '> 99.9' : f(c, 1)) + '%')); });
+    ageHost.append(h('p', { class: 'small', style: { marginBottom: '6px' } }, 'Measurement: ' + f(S.x, dd) + ' mL'), h('table', { class: 't' }, h('thead', {}, h('tr', {}, h('th', {}, 'Age'), h('th', { class: 'n' }, 'Expected (mL)'), h('th', { class: 'n' }, 'SD (mL)'), h('th', { class: 'n' }, 'z'), h('th', { class: 'n' }, 'Centile'))), h('tbody', {}, rows)),
+      h('p', { class: 'small', style: { marginTop: '6px' } }, S.mode === 'sym' ? 'Centile here comes from the z-score and a normal curve.' : 'Centile here is the true value for the skewed reference.'));
+  }
+
+  /* ---------------------------------------------------------------- many regions */
+  const regSl = PBS.slider({ id: 'nreg', label: 'Number of brain regions tested', min: 1, max: 100, step: 1, value: S.N, fmt: (v) => String(v), onInput: (v) => { S.N = v; updateRegions(); } });
+  const thrSeg = PBS.seg({ label: 'Flag threshold', value: S.thr, options: [{ v: 'a', label: 'Outside 5th–95th' }, { v: 'b', label: 'Outside 2.5th–97.5th' }, { v: 'c', label: 'Outside 0.5th–99.5th' }], onChange: (v) => { S.thr = v; updateRegions(); } });
+  thrSeg.classList.add('chips');
+  const newBrain = h('button', { class: 'btn alt sm', type: 'button', id: 'newbrain' }, 'Scan another healthy brain');
+  newBrain.addEventListener('click', () => { S.brain++; updateRegions(); });
+  const gridHost = h('div', { id: 'brain' }), regTxt = h('div', { id: 'regtxt', class: 'callout soft', style: { marginTop: '10px', marginBottom: 0 }, 'aria-live': 'polite' });
+  const chRHost = h('div', {});
+  root.append(h('div', { class: 'lab wide-controls', style: { marginTop: '26px' } },
+    PBS.card('Testing many regions at once', [h('p', { class: 'small' }, 'Every region of a healthy brain has a chance of being flagged. The chart shows the chance that a healthy brain has at least one flagged region, for 1 to 100 regions.'), chRHost, regTxt]),
+    h('div', { class: 'stack' }, PBS.card('Settings', [regSl, h('div', { class: 'ctl' }, h('div', { class: 'lbl' }, h('span', {}, 'A region is flagged when it is')), thrSeg)]),
+      PBS.card('One healthy brain', [gridHost, h('div', { class: 'row', style: { marginTop: '8px' } }, newBrain)]))));
+  const chR = PBS.chart(chRHost, { w: 620, h: 360, m: { l: 58, r: 20, t: 16, b: 52 }, xd: [0, 100], yd: [0, 100], xt: [1, 20, 40, 60, 80, 100], yt: [0, 25, 50, 75, 100], yfmt: (v) => v + '%', xlabel: 'Number of regions tested', ylabel: 'Healthy brains with at least one flag', label: 'Chance that a healthy brain has at least one flagged region' });
+  function updateRegions() {
+    const L = chR.layer(), keys = ['a', 'b', 'c'];
+    keys.forEach((k) => {
+      const q = THR[k].q, pts = []; for (let n = 1; n <= 100; n++) pts.push([n, (1 - Math.pow(1 - q, n)) * 100]);
+      const on = k === S.thr;
+      L.append(s('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + chR.x(p[0]).toFixed(1) + ' ' + chR.y(p[1]).toFixed(1)).join(''), fill: 'none', stroke: on ? 'var(--coral)' : 'var(--rose)', 'stroke-width': on ? 3.4 : 1.8, 'stroke-opacity': on ? 1 : 0.7, 'stroke-dasharray': k === 'c' && !on ? '5 3' : '' }));
+    });
+    L.append(s('line', { x1: chR.x(S.N), x2: chR.x(S.N), y1: chR.m.t, y2: chR.y(0), stroke: 'var(--coral-ink)', 'stroke-width': 1.5, 'stroke-dasharray': '4 3' }));
+    const pv = (1 - Math.pow(1 - THR[S.thr].q, S.N)) * 100;
+    L.append(s('circle', { cx: chR.x(S.N), cy: chR.y(pv), r: 6, fill: 'var(--coral)', stroke: 'var(--card)', 'stroke-width': 2 }));
+    [['a', '10% per region', 34, 17], ['b', '5% per region', 34, 17], ['c', '1% per region', 74, -9]].forEach(([k, txt, n, dy]) => { const yv = (1 - Math.pow(1 - THR[k].q, n)) * 100; L.append(s('text', { class: 'tick', x: chR.x(n), y: chR.y(yv) + dy, 'text-anchor': 'middle', text: txt, style: 'font-size:12px' })); });
+    // simulation: 1000 healthy brains
+    const rng = PBS.rng(4242), zc = THR[S.thr].z; let any = 0, tot = 0;
+    for (let b = 0; b < 1000; b++) { let c = 0; for (let r = 0; r < S.N; r++) if (Math.abs(rng.n()) > zc) c++; if (c > 0) any++; tot += c; }
+    regTxt.innerHTML = 'With <b>' + S.N + '</b> region' + (S.N === 1 ? '' : 's') + ' and a flag at ' + THR[S.thr].label.toLowerCase() + ': expected <b>' + f(S.N * THR[S.thr].q, 1) + '</b> flagged per healthy brain, and <b>' + f(pv, 0) + '%</b> of healthy brains have at least one. In 1,000 simulated healthy brains: <b>' + f(any / 10, 0) + '%</b> had at least one flag, on average <b>' + f(tot / 1000, 1) + '</b> flagged.';
+    // one brain
+    PBS.clear(gridHost);
+    const r2 = PBS.rng(777 + S.brain * 31), cell = 17, W = 10 * cell + 4; let k = 0;
+    const svg = s('svg', { viewBox: `0 0 ${W} ${W}`, class: 'chart', role: 'img', style: 'max-width:240px;margin:0 auto', 'aria-label': 'One simulated healthy brain with flagged regions' });
+    for (let i = 0; i < 100; i++) {
+      const rr = Math.floor(i / 10), cc = i % 10, inn = i < S.N, z = r2.n(), fl = inn && Math.abs(z) > zc; if (fl) k++;
+      svg.append(s('circle', { cx: 10 + cc * cell, cy: 10 + rr * cell, r: 6.3, fill: fl ? 'var(--coral)' : 'none', stroke: inn ? (fl ? 'var(--coral)' : 'var(--rose)') : 'var(--grid)', 'stroke-width': 1.3, 'stroke-opacity': inn ? 1 : 0.7 }));
+    }
+    gridHost.append(svg, h('p', { class: 'small', style: { textAlign: 'center', margin: '4px 0 0' }, 'aria-live': 'polite' }, k + ' of ' + S.N + ' regions flagged in this healthy brain.'));
+  }
+
+  /* ---------------------------------------------------------------- tasks */
+  const tasks = h('div', { class: 'tasks', style: { marginTop: '26px' } },
+    h('h2', {}, 'Guided tasks'),
+    PBS.doTask({ tag: 'Try', title: '1. Read a z-score and a centile', doit: '<b>Do this:</b> choose the symmetric reference, age 20, and drag the measurement to 3.0 mL. Write down the z-score and the centile. Now drag to 4.0 mL, then to 5.0 mL.',
+      reveal: 'At 3.0 mL the z-score is −2 and the centile about 2.3%. At 4.0 mL (the mean) z is 0 and the centile 50%. At 5.0 mL z is +2 and the centile about 97.7%. Centile and z-score carry the same information. A centile is a share of healthy people. A z-score is a distance in standard deviations.' }),
+    PBS.task({ tag: 'Predict', title: '2. Keep the measurement at 3.4 mL and move the reference age from 20 to 70. What happens to the z-score?',
+      options: [{ t: 'It becomes more negative: the person looks more atypical', fb: 'The expected volume falls with age, so 3.4 mL is closer to what is expected for an older person.' }, { t: 'It moves towards zero and becomes positive: 3.4 mL is typical for an older person', ok: true, fb: 'At 20 the z-score is −1.2. At 70 the expected value is 3.2 mL and the z-score is +0.4. The same raw number means different things at different ages, which is the reason for an age-specific reference.' }, { t: 'It stays the same', fb: 'The measurement is the same but the reference is not. Look at the “expected at this age” tile.' }] }),
+    PBS.doTask({ tag: 'Try', title: '3. Break the normal curve', doit: '<b>Do this:</b> choose the skewed reference, set age 20, and drag the measurement to 8 mL. Compare “Centile from z (normal curve)” with “True centile”.',
+      reveal: 'At age 20 the expected value is 20 mL with an SD of 10 mL, so 8 mL has a z-score of −1.2. A normal curve would put that person at about the 11th–12th centile. In this skewed reference the true centile is only about the 4th. A z-score computed from a mean and an SD assumes a symmetric curve, so in a skewed measure the tails are wrong. This is one reason models such as GAMLSS also model the shape of the distribution.' }),
+    PBS.task({ tag: 'Predict', title: '4. A healthy brain, 100 regions, flag outside the 2.5th–97.5th centiles. Roughly how many regions are flagged?',
+      options: [{ t: 'None: the person is healthy', fb: 'Each region has a 5% chance of being flagged by chance, so none is very unlikely.' }, { t: 'About five, and almost every healthy brain has at least one', ok: true, fb: '5% of 100 regions is about 5. With 100 regions, the chance of none is 0.95 to the power 100, below 1%. A few flagged regions in a healthy person are normal.' }, { t: 'About 25', fb: 'That would need a 25% chance per region. Read the sentence under the chart.' }] }),
+    PBS.numtask({ tag: 'Calculate', title: '5. How many regions do you need before a healthy brain is more likely than not to have a flagged region?', body: '<p class="small">Use the 5% per region setting (“Outside 2.5th–97.5th”). Drag the region slider until the chance passes 50%.</p>', label: 'Number of regions', answer: 14, tol: 1.5,
+      fbRight: 'With 14 regions the chance is 1 − 0.95<sup>14</sup> = 51%. A handful of regions is enough.', fbWrong: 'Try 14: 1 − 0.95<sup>14</sup> is about 51%. Use the slider to check.' }));
+  root.append(tasks);
+
+  /* ---------------------------------------------------------------- quiz */
+  let correct = 0, answered = 0; const scoreEl = h('span', { class: 'score', id: 'score' }, '0 / 0');
+  const rec = (ok) => { answered++; if (ok) correct++; scoreEl.textContent = correct + ' / ' + answered; };
+  const quiz = h('div', { class: 'tasks', style: { marginTop: '26px' } },
+    h('h2', {}, 'Quiz', scoreEl),
+    h('p', { class: 'small' }, 'Eight questions. Your score counts your first answer to each.'),
+    PBS.numtask({ tag: 'Q1', title: 'The expected volume is 4.0 mL with an SD of 0.5 mL. A person measures 3.1 mL. What is the z-score?', label: 'z =', answer: -1.8, tol: 0.05, onAnswer: rec,
+      fbRight: '(3.1 − 4.0) ÷ 0.5 = −1.8.', fbWrong: 'Subtract the expected value from the measurement, then divide by the SD: (3.1 − 4.0) ÷ 0.5. Use a minus sign.' }),
+    PBS.task({ tag: 'Q2', title: 'A z-score of −2 corresponds roughly to which centile?', onAnswer: (i, ok) => rec(ok), options: [{ t: 'The 2nd', ok: true, fb: 'About 2.3% of a normal distribution lies below −2 SD.' }, { t: 'The 16th', fb: 'That is a z-score of −1.' }, { t: 'The 50th', fb: 'The 50th centile is a z-score of 0.' }] }),
+    PBS.task({ tag: 'Q3', title: 'A person is on the 84th centile. Roughly what is their z-score?', onAnswer: (i, ok) => rec(ok), options: [{ t: '+0.84', fb: 'Centiles and z-scores are different scales. The 84th centile is not a z-score of 0.84.' }, { t: '+1', ok: true, fb: 'About 84% of a normal distribution lies below +1 SD.' }, { t: '+2', fb: 'That is about the 98th centile.' }] }),
+    PBS.task({ tag: 'Q4', title: 'A 20-year-old and a 70-year-old both have a z-score of −1.5 against a normal reference for their own age. Which statement is correct?', onAnswer: (i, ok) => rec(ok), options: [{ t: 'They sit at the same centile, about the 7th, although their raw volumes differ', ok: true, fb: 'The z-score is already relative to each person’s own age group, so equal z-scores mean equal centiles under a normal reference.' }, { t: 'The 70-year-old is more unusual, because they are older', fb: 'Age has already been taken into account in the z-score.' }, { t: 'They have the same volume', fb: 'The expected volume differs by age, so the same z-score means different raw volumes.' }] }),
+    PBS.task({ tag: 'Q5', title: 'A person is on the 3rd centile. What does that mean?', onAnswer: (i, ok) => rec(ok), options: [{ t: '3% of their brain is missing', fb: 'A centile does not measure loss of tissue.' }, { t: '3 in 100 healthy people of the same age and sex have a smaller value', ok: true, fb: 'A centile is a position in the reference group.' }, { t: 'They have a 3% chance of disease', fb: 'A centile is not a probability of disease. That depends on how common the disease is and how it changes the measure.' }] }),
+    PBS.task({ tag: 'Q6', title: 'The measure has a long upper tail (skewed). What is the risk of using a z-score from the mean and SD?', onAnswer: (i, ok) => rec(ok), options: [{ t: 'The centile it implies can be wrong in the tails', ok: true, fb: 'A normal curve puts the wrong amount of probability in each tail of a skewed distribution. A model that fits the shape can fix this.' }, { t: 'The z-score becomes larger for everyone', fb: 'It does not change in a consistent direction: the error is largest in the tails.' }, { t: 'No risk: z-scores always work', fb: 'They assume a symmetric shape. See task 3.' }] }),
+    PBS.task({ tag: 'Q7', title: 'A healthy person is scanned and 5 of 100 regions are flagged at the 5% threshold. What does this suggest?', onAnswer: (i, ok) => rec(ok), options: [{ t: 'Nothing unusual: this is what chance gives', ok: true, fb: 'About 5 regions are expected to be flagged by chance when 100 regions are tested.' }, { t: 'A neurological disorder', fb: 'The number of flags is what chance alone produces.' }, { t: 'A scanner fault', fb: 'Nothing here points to a fault. The number is what chance alone produces.' }] }),
+    PBS.numtask({ tag: 'Q8', title: 'What centile corresponds to a z-score of −1.8? Use the “Centile” tile in the reader if you like.', label: 'Centile', unit: '%', answer: 3.6, tol: 0.5, onAnswer: rec,
+      fbRight: 'Yes: the share of a normal distribution below −1.8 is about 3.6%.', fbWrong: 'Set the symmetric reference at age 20 and drag the measurement to 3.1 mL (z = −1.8), then read the centile: about 3.6%.' }));
+  root.append(quiz);
+  root.append(PBS.takeaway([
+    'A z-score is the distance from the expected value in standard deviations. A centile is the share of healthy people below you. For a normal curve they carry the same information.',
+    'Both are relative to the reference group, so the reference (age, sex, shape) decides what a number means.',
+    'Test many regions and some healthy people will be flagged by chance. A flag is a reason to look, not a diagnosis.']));
+  root.append(h('p', { class: 'src' }, 'Simulated reference values. The hippocampal mean of 4.0 mL falling by 0.016 mL a year is invented for teaching.'));
+
+  PBS.frame('reader', root);
+  function update() { drawChart(); drawStats(); drawAges(); }
+  setSliderRange(); update(); updateRegions();
+  window.__lab = { S, update, updateRegions, zOf };
+})();
+</script>
+</body>
+</html>

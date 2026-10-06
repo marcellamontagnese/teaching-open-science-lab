@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scanner fingerprint lab – PBS08</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .seg.chips { border: 0; gap: 6px; border-radius: 0; overflow: visible; }
+  .seg.chips button { border: 1.5px solid var(--rose); border-radius: 8px; }
+  .seg.chips button:last-child { border-right: 1.5px solid var(--rose); }
+  .tri { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 560px) { .tri { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tri .pane:nth-child(3) { grid-column: 1 / -1; width: 62%; justify-self: center; } }
+  @media (max-width: 920px) { .lab.fp { display: flex; flex-direction: column; gap: 16px; } .lab.fp > .stack { display: contents; } .lab.fp .c-img { order: 1; } .lab.fp .c-ctl { order: 2; } .lab.fp .c-res { order: 3; } }
+  .pane { min-width: 0; }
+  .pane .vt { font-size: 14px; font-weight: 800; margin: 0 0 3px; display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+  .pane .vt span { color: var(--muted); font-weight: 400; }
+  .vwrap { position: relative; background: #000; border-radius: 6px; overflow: hidden; line-height: 0; }
+  .vwrap canvas { width: 100%; height: auto; display: block; }
+  .vwrap .o { position: absolute; font-size: 12px; font-weight: 800; line-height: 1; color: rgba(244, 203, 201, .95); pointer-events: none; text-shadow: 0 0 3px #000; }
+  .o.l { left: 5px; top: 50%; transform: translateY(-50%); } .o.r { right: 5px; top: 50%; transform: translateY(-50%); }
+  .rowlbl { font-weight: 800; font-size: 15px; margin: 14px 0 6px; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+  .rowlbl span { font-weight: 400; color: var(--muted); font-size: 14px; }
+  .key { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; font-size: 14px; color: var(--muted); }
+  .key i { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+  .loading { padding: 30px 10px; text-align: center; color: var(--muted); font-weight: 700; }
+  .scores { margin-top: 12px; }
+  .note { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
+  .stat .v small { font-size: 14px; font-weight: 700; color: var(--muted); }
+  .ctl .hint b { color: var(--coral-ink); }
+  .sep { border: 0; border-top: 1px solid var(--grid); margin: 12px 0; }
+</style>
+</head>
+<body>
+<div class="wrap" id="root">
+  <noscript><p class="callout">These labs need JavaScript. Please enable it and reload.</p></noscript>
+</div>
+<script src="shared.js"></script>
+<script src="brain_data.js"></script>
+<script src="brain.js"></script>
+<script>
+(function () {
+  const { h, s, f } = PBS, B = PBS.brain;
+  const root = document.getElementById('root');
+  const narrow = () => window.innerWidth < 700;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  /* ---------------------------------------------------------------- the simulation ----------
+     One real brain (the ICBM152 average, with a little simulated atrophy for the "travelling brains"), scanned by a virtual scanner that
+     can change four things: how strongly grey matter and white matter differ in brightness (contrast), random noise (Rician, as in MRI
+     magnitude images), blur (resolution), and a smooth brightness gradient across the head (coil bias). A deliberately naive measurement
+     then labels tissue with fixed brightness cut-offs that were tuned on scanner A. */
+  const WM = 220, CUT1 = 117, CUT2 = 193;                 // cut-offs: CSF | grey matter | white matter (midpoints on scanner A)
+  const SCAN_A = { c: 1.0, noise: 4, blur: 0.4, bias: 0.03 };
+  const PRESETS = [
+    { v: 'A', label: 'Same as A', p: SCAN_A },
+    { v: 'old', label: 'Older 1.5 T scanner', p: { c: 0.85, noise: 12, blur: 1.1, bias: 0.12 } },
+    { v: 'seq', label: 'Different T1 sequence', p: { c: 1.25, noise: 6, blur: 0.6, bias: 0.08 } },
+    { v: 'coil', label: 'Faulty coil', p: { c: 1.0, noise: 8, blur: 0.5, bias: 0.3 } },
+  ];
+  const SLICES = [-30, -22, -14, -6, 2, 10, 18, 26, 34, 42, 50, 58];       // axial slices (mm) used for every measurement
+  const NTRAV = 6, FITSET = [0, 1, 3, 5];                                  // travelling brains; those used to fit the correction
+  const ATROPHY = (t) => ({ widen: 0.05 * t, e: 0.8 * t });
+
+  function scan(clean, P, seed, sc) {
+    const { I, M, w, h: hh } = clean, n = w * hh;
+    let X = new Float32Array(n);
+    for (let i = 0; i < n; i++) X[i] = M[i] ? WM - P.c * (WM - I[i]) : 0;
+    X = P.blur * sc > 0.05 ? B.blur(X, w, hh, P.blur * sc) : X;
+    const rg = PBS.rng(seed), sg = P.noise;
+    for (let y = 0; y < hh; y++) {
+      const v = (y / (hh - 1)) * 2 - 1;
+      for (let x = 0; x < w; x++) {
+        const u = (x / (w - 1)) * 2 - 1, i = y * w + x;
+        const fld = 1 + P.bias * (0.75 * u - 0.45 * v - 0.25 * (u * u + v * v - 0.6));
+        const val = X[i] * fld, a = val + sg * rg.n(), b = sg * rg.n();
+        X[i] = Math.sqrt(a * a + b * b);
+      }
+    }
+    return X;
+  }
+  function classify(X, M) { const L = new Uint8Array(X.length); for (let i = 0; i < X.length; i++) if (M[i]) L[i] = X[i] < CUT1 ? 1 : (X[i] < CUT2 ? 2 : 3); return L; }
+  function measure(X, M, w, ox) { // grey-matter share of the brain mask, whole and by hemisphere (x < 0 is left)
+    let gm = 0, n = 0, gl = 0, nl = 0, gr = 0, nr = 0, csf = 0;
+    for (let y = 0, i = 0; y < X.length / w; y++) for (let x = 0; x < w; x++, i++) {
+      if (!M[i]) continue; const isGM = X[i] >= CUT1 && X[i] < CUT2 ? 1 : 0; gm += isGM; n++; if (X[i] < CUT1) csf++;
+      if (x + ox < 0) { gl += isGM; nl++; } else { gr += isGM; nr++; }
+    }
+    return { gm, n, gl, nl, gr, nr, csf };
+  }
+  function addM(a, b) { return { gm: a.gm + b.gm, n: a.n + b.n, gl: a.gl + b.gl, nl: a.nl + b.nl, gr: a.gr + b.gr, nr: a.nr + b.nr, csf: a.csf + b.csf }; }
+  const share = (m) => 100 * (1 - m.csf / m.n), lr = (m) => 100 * (m.gl / m.nl - m.gr / m.nr);
+
+  /* ---------------------------------------------------------------- state */
+  const S = { P: Object.assign({}, SCAN_A), z: 2, preset: 'A', harm: false };
+  let cleanTrav = null, resA = null, resY = null, fit = null, cleanDisp = null, dispA = null;
+
+  /* ---------------------------------------------------------------- head */
+  root.append(
+    h('h1', {}, 'Scanner fingerprint: the same brain on different scanners'),
+    h('p', { class: 'sub' }, 'Lab 2 gave a scanner a shift and a stretch. Here you see where they come from. Scan one real brain on a virtual scanner, change how the image is made, and watch a fixed measurement give a different answer for exactly the same brain.'),
+    h('div', { class: 'callout' }, h('b', {}, 'What is real here. '), 'The brain is a real MRI template (the open ICBM152 average of 152 healthy young adults). The scanners are simulated: four simple changes to the image, not a model of any real machine. The measurement is deliberately naive, so the effect is easy to see. Real pipelines adapt to each image and are more robust, but they do not remove scanner effects.'));
+
+  /* ---------------------------------------------------------------- controls */
+  const presetSeg = PBS.seg({ label: 'Scanner preset', value: 'A', options: PRESETS.map((p) => ({ v: p.v, label: p.label })), onChange: (v) => { S.preset = v; const p = PRESETS.find((q) => q.v === v).p; setParams(p); } });
+  presetSeg.classList.add('chips');
+  const sl = {};
+  const mk = (key, o) => { sl[key] = PBS.slider(Object.assign({ onInput: (v) => { S.P[key] = v; S.preset = null; presetSeg.set(null); refresh(false); } }, o, { value: S.P[key] })); return sl[key]; };
+  const ctlBox = h('div', {},
+    h('div', { class: 'ctl' }, h('div', { class: 'lbl' }, h('span', {}, 'Start from')), presetSeg),
+    mk('c', { label: 'Tissue contrast', min: 0.6, max: 1.4, step: 0.05, fmt: (v) => f(v, 2) + '×', hint: '1.00 = grey matter and white matter differ by 54 brightness units, as on scanner A.' }),
+    mk('noise', { label: 'Noise', min: 0, max: 30, step: 1, fmt: (v) => f(v, 0), hint: 'Random brightness error added to every pixel.' }),
+    mk('blur', { label: 'Blur', min: 0, max: 2.5, step: 0.1, fmt: (v) => f(v, 1) + ' mm', hint: 'Lower resolution smears tissue boundaries.' }),
+    mk('bias', { label: 'Coil bias', min: 0, max: 0.4, step: 0.01, fmt: (v) => '±' + f(v * 100, 0) + '%', hint: 'A smooth brightening towards one side of the head.' }),
+    h('hr', { class: 'sep' }),
+    PBS.slider({ label: 'Slice shown (axial)', min: -30, max: 58, step: 1, value: S.z, fmt: (v) => 'z ' + f(v, 0) + ' mm', onInput: (v) => { S.z = v; prepDisplay(); refresh(false); } }));
+
+  /* ---------------------------------------------------------------- views */
+  const cv = {}; const mkPane = (id, title, sub) => { cv[id] = h('canvas', { width: 10, height: 10, 'aria-label': title }); return h('div', { class: 'pane' }, h('div', { class: 'vt' }, title, h('span', { id: 'sub_' + id }, sub || '')), h('div', { class: 'vwrap' }, cv[id], h('span', { class: 'o l' }, 'L'), h('span', { class: 'o r' }, 'R'))); };
+  const triTop = h('div', { class: 'tri' }, mkPane('a', 'Scanner A', 'reference'), mkPane('y', 'Your scanner', ''), mkPane('d', 'Yours minus A', ''));
+  const triLab = h('div', { class: 'tri' }, mkPane('la', 'Tissue labels, A', ''), mkPane('ly', 'Tissue labels, yours', ''), mkPane('ld', 'Where they disagree', ''));
+  const keyEl = h('div', { style: { marginTop: '8px' } },
+    h('span', { class: 'key' }, h('i', { style: { background: '#2f6db5' } }), 'CSF'), h('span', { class: 'key' }, h('i', { style: { background: '#ce6a64' } }), 'grey matter'), h('span', { class: 'key' }, h('i', { style: { background: '#e6dfd8' } }), 'white matter'),
+    h('span', { class: 'key' }, h('i', { style: { background: '#e8872f' } }), 'label differs from A'));
+  const stage = h('div', { hidden: true },
+    h('div', { class: 'rowlbl' }, 'The images', h('span', {}, 'identical anatomy; only the scanner differs')), triTop,
+    h('div', { class: 'rowlbl' }, 'What a fixed measurement sees', h('span', {}, 'cut-offs tuned on scanner A: dark = CSF, mid = grey matter, bright = white matter')), triLab, keyEl);
+
+  /* ---------------------------------------------------------------- results panel */
+  const tiles = h('div', { class: 'stats' });
+  const chartHost = h('div', {}), chartNote = h('p', { class: 'note' });
+  const harmToggle = PBS.toggle({ label: 'Correct yours back onto scanner A’s scale', value: false, onChange: (v) => { S.harm = v; drawChart(); } });
+  const resBody = h('div', {},
+    h('p', { style: { marginTop: 0 } }, h('b', {}, 'Tissue share'), ' is the percentage of the brain mask labelled as grey or white matter rather than CSF, over twelve axial slices: a simple version of the brain parenchymal fraction used to measure atrophy. Brain 1 is the unchanged template.'), tiles,
+    h('div', { class: 'rowlbl' }, 'Six “travelling” brains, scanned on both', h('span', {}, 'the same people measured twice; they differ only in how much atrophy was drawn in')),
+    chartHost, h('div', { class: 'row', style: { marginTop: '8px' } }, harmToggle), chartNote);
+
+  const cImg = PBS.card('One brain, two scanners', h('div', {}, h('div', { class: 'loading', id: 'loading' }, 'Preparing the brain…'), stage)), cRes = PBS.card('What the measurement says', resBody), cCtl = PBS.card('Your scanner', ctlBox);
+  cImg.classList.add('c-img'); cRes.classList.add('c-res'); cCtl.classList.add('c-ctl');
+  root.append(h('div', { class: 'lab fp' }, h('div', { class: 'stack' }, cImg, cRes), h('div', { class: 'stack' }, cCtl)));
+
+  /* ---------------------------------------------------------------- computation */
+  function prepTrav() {
+    cleanTrav = [];
+    for (let t = 0; t < NTRAV; t++) { const a = ATROPHY(t), row = []; for (const z of SLICES) { const S1 = B.slice('ax', z, { blobs: [], vent: { e: a.e, z: 0 }, widen: a.widen, scale: 1 }); row.push({ I: S1.I, M: S1.M, w: S1.w, h: S1.h }); } cleanTrav.push(row); }
+    resA = cleanTrav.map((row, t) => stack(row, SCAN_A, 100 + t * 31)); fit = null;
+  }
+  function stack(row, P, seedBase) { let m = null; row.forEach((cl, k) => { const X = scan(cl, P, seedBase + k * 7, 1); const q = measure(X, cl.M, cl.w, B.origin[0]); m = m ? addM(m, q) : q; }); return m; }
+  function prepDisplay() {
+    const S1 = B.slice('ax', S.z, { blobs: [], vent: { e: 0, z: 0 }, widen: 0, scale: narrow() ? 1.8 : 1.4 });
+    cleanDisp = { I: S1.I, M: S1.M, w: S1.w, h: S1.h };
+    dispA = scan(cleanDisp, SCAN_A, 11, narrow() ? 1.8 : 1.4);
+  }
+  function computeY() { resY = cleanTrav.map((row, t) => stack(row, S.P, 5000 + t * 31)); fit = null; }
+
+  function paintGray(canvas, X, w, hh, M) { B.paint(canvas, { w, h: hh, I: X, M, Z: null, R: null }, {}); }
+  function paintLabels(canvas, L, w, hh, other) {
+    canvas.width = w; canvas.height = hh; const ctx = canvas.getContext('2d'), img = ctx.createImageData(w, hh), d = img.data;
+    const col = [[0, 0, 0], [47, 109, 181], [206, 106, 100], [230, 223, 216]];
+    for (let i = 0, q = 0; i < L.length; i++, q += 4) {
+      let c = col[L[i]];
+      if (other) { if (L[i] === 0) c = col[0]; else c = other[i] !== L[i] ? [232, 135, 47] : [70, 70, 70]; }
+      d[q] = c[0]; d[q + 1] = c[1]; d[q + 2] = c[2]; d[q + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  function paintDiff(canvas, XA, XY, M, w, hh) {
+    canvas.width = w; canvas.height = hh; const ctx = canvas.getContext('2d'), img = ctx.createImageData(w, hh), d = img.data;
+    for (let i = 0, q = 0; i < XA.length; i++, q += 4) {
+      const v = XY[i] - XA[i], a = Math.min(1, Math.abs(v) / 45), c = v < 0 ? [47, 109, 181] : [232, 135, 47], g = M[i] ? 70 : 0;
+      d[q] = g * (1 - a) + c[0] * a; d[q + 1] = g * (1 - a) + c[1] * a; d[q + 2] = g * (1 - a) + c[2] * a; d[q + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  function refresh(full) {
+    if (!cleanDisp) return;
+    const { w, h: hh, M } = cleanDisp, sc = narrow() ? 1.8 : 1.4;
+    const XY = scan(cleanDisp, S.P, 6011, sc);
+    paintGray(cv.a, dispA, w, hh, M); paintGray(cv.y, XY, w, hh, M);
+    paintDiff(cv.d, dispA, XY, M, w, hh);
+    const LA = classify(dispA, M), LY = classify(XY, M);
+    paintLabels(cv.la, LA, w, hh); paintLabels(cv.ly, LY, w, hh); paintLabels(cv.ld, LY, w, hh, LA);
+    let diff = 0, nM = 0; for (let i = 0; i < LA.length; i++) if (M[i]) { nM++; if (LA[i] !== LY[i]) diff++; }
+    document.getElementById('sub_d').textContent = 'blue: darker, orange: brighter';
+    document.getElementById('sub_ld').textContent = f(100 * diff / nM, 0) + '% of pixels';
+    clearTimeout(refresh.t); refresh.t = setTimeout(() => { computeY(); renderResults(); }, full ? 0 : 140);
+  }
+  function setParams(p) { Object.assign(S.P, p); for (const k of Object.keys(sl)) sl[k].set(S.P[k]); refresh(false); }
+
+  /* ---------------------------------------------------------------- results */
+  function fitLine() {
+    if (fit) return fit;
+    const xs = FITSET.map((t) => share(resA[t])), ys = FITSET.map((t) => share(resY[t]));
+    const o = PBS.ols(xs.map((x) => [1, x]), ys); fit = { a: o.beta[0], b: o.beta[1] }; return fit;
+  }
+  function renderResults() {
+    const A0 = resA[0], Y0 = resY[0], dAll = resY.map((m, t) => share(m) - share(resA[t]));
+    const meanShift = PBS.mean(dAll), range = share(resA[0]) - share(resA[NTRAV - 1]);
+    PBS.clear(tiles);
+    const tile = (k, v, sub) => h('div', { class: 'stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v' + (sub === 'c' ? ' coral' : '') }, v));
+    tiles.append(
+      tile('Brain 1, scanner A', f(share(A0), 1) + '%'), tile('Brain 1, your scanner', f(share(Y0), 1) + '%'),
+      tile('Same brain: yours minus A', (share(Y0) - share(A0) > 0 ? '+' : '') + f(share(Y0) - share(A0), 1) + ' pts', 'c'),
+      tile('Atrophy range on A (brain 1 to 6)', f(range, 1) + ' pts'),
+      tile('Grey matter, left minus right: A', f(lr(A0), 1) + ' pts'), tile('Grey matter, left minus right: yours', f(lr(Y0), 1) + ' pts', 'c'));
+    drawChart(); S.stats = { meanShift, range, shift0: share(Y0) - share(A0), lrA: lr(A0), lrY: lr(Y0) };
+  }
+  function drawChart() {
+    if (!resY) return;
+    PBS.clear(chartHost);
+    const xs = resA.map(share), ys = resY.map(share), fl = fitLine();
+    const corr = S.harm ? ys.map((y) => (y - fl.a) / fl.b) : ys;
+    const lo = Math.floor(Math.min(...xs, ...corr, ...ys) - 2), hi = Math.ceil(Math.max(...xs, ...corr, ...ys) + 2);
+    const ch = PBS.chart(chartHost, { w: 640, h: 380, m: { l: 62, r: 20, t: 14, b: 54 }, xd: [lo, hi], yd: [lo, hi], xt: PBS.ticks(lo, hi, hi - lo > 24 ? 5 : 2), yt: PBS.ticks(lo, hi, hi - lo > 24 ? 5 : 2), xlabel: 'Tissue share measured on scanner A (%)', ylabel: S.harm ? 'Yours, corrected (%)' : 'Tissue share on yours (%)', label: 'Same brains measured on two scanners' });
+    const g = ch.layer();
+    g.append(PBS.s('line', { x1: ch.x(lo), y1: ch.y(lo), x2: ch.x(hi), y2: ch.y(hi), stroke: 'var(--muted)', 'stroke-width': 1.5, 'stroke-dasharray': '6 5' }));
+    g.append(PBS.s('text', { class: 'note', x: ch.x(lo) + 10, y: ch.y(hi) + 16, 'text-anchor': 'start', text: 'dashed line: same result on both scanners' }));
+    if (!S.harm) { g.append(PBS.s('line', { x1: ch.x(lo), y1: ch.y(fl.a + fl.b * lo), x2: ch.x(hi), y2: ch.y(fl.a + fl.b * hi), stroke: 'var(--coral)', 'stroke-width': 2.4, 'clip-path': ch.clip })); }
+    for (let t = 0; t < NTRAV; t++) {
+      const used = FITSET.includes(t);
+      g.append(PBS.s('circle', { cx: ch.x(xs[t]), cy: ch.y(corr[t]), r: 7, fill: used ? 'var(--coral)' : 'var(--card)', stroke: 'var(--coral)', 'stroke-width': 2.4 }));
+      g.append(PBS.s('text', { class: 'tick', x: ch.x(xs[t]) + 10, y: ch.y(corr[t]) + 4, text: String(t + 1) }));
+    }
+    const resid = FITSET.length < NTRAV ? [0, 1, 2, 3, 4, 5].filter((t) => !FITSET.includes(t)).map((t) => Math.abs(corr[t] - xs[t])) : [];
+    const meanDiff = PBS.mean(corr.map((y, t) => y - xs[t]));
+    PBS.clear(chartNote);
+    chartNote.append(S.harm
+      ? 'After correction the points sit on the dashed line. The line was fitted on the filled points (brains 1, 2, 4 and 6); the open points (3 and 5) were held out, and their mean remaining error is ' + f(PBS.mean(resid), 1) + ' pts.'
+      : 'Fitted line: yours = ' + f(fl.a, 1) + ' + ' + f(fl.b, 2) + ' × A. The intercept is the shift and the slope is the stretch, the same two numbers as in Lab 2. Mean scanner difference over the six brains: ' + (meanDiff > 0 ? '+' : '') + f(meanDiff, 1) + ' pts.');
+  }
+
+  /* ---------------------------------------------------------------- tasks (filled in below) */
+  const tasks = h('div', { class: 'tasks' },
+    h('h2', {}, 'Guided tasks'),
+    PBS.task({ tag: 'Predict', title: '1. Change one thing at a time. Which change moves the tissue share of the same brain most?',
+      body: '<p class="small">Start from “Same as A”. Then try tissue contrast 0.8 and 1.25, noise 20, blur 2.0, and coil bias 0.3, one at a time, and read “Same brain: yours minus A”.</p>',
+      options: [{ t: 'Noise', fb: 'Noise 20 shifts the tissue share by less than one point here: it is random, and it averages out over thousands of pixels.' },
+        { t: 'Blur', fb: 'Blur 2.0 changes this measure by well under a point, because blurring moves CSF-to-tissue boundaries both ways. A measure of thin structures, such as cortical thickness, would be far more sensitive to resolution.' },
+        { t: 'Tissue contrast', ok: true, fb: 'Contrast 0.8 shifts the result by about +4 points and 1.25 by about −6 points, because the fixed cut-offs were tuned for contrast 1.00. Coil bias (about −1.4 points), noise (about −0.7) and blur (about −0.3) matter much less for this measure.' },
+        { t: 'Coil bias', fb: 'Coil bias 0.3 changes the tissue share by only about 1 point. Its bigger effect is on <i>where</i> tissue is labelled, as the next task shows.' }] }),
+    PBS.doTask({ tag: 'Try', title: '2. A fake asymmetry from a faulty coil',
+      doit: '<b>Do this:</b> choose “Faulty coil” (coil bias 0.30). Look at the difference image and at the labels row, then at the two “grey matter, left minus right” tiles.',
+      reveal: 'To the eye the image just looks a bit brighter on one side. The fixed cut-offs, however, label bright grey matter as white matter on one side and dark white matter as grey matter on the other. The left–right difference in grey-matter share jumps from about 3 points on scanner A to about 25. A study comparing groups scanned on different coils could report a “left–right asymmetry” that is really a coil. Real pipelines correct the bias field, but never perfectly.' }),
+    PBS.task({ tag: 'Predict', title: '3. Choose “Different T1 sequence”. How big is the scanner effect, compared with the atrophy across the six travelling brains?',
+      body: '<p class="small">On scanner A the six brains span about 7 points of tissue share, from none to a lot of atrophy. Look at the chart and its note.</p>',
+      options: [{ t: 'Much smaller than the biological range', fb: 'Check the chart: the points sit far from the dashed line.' },
+        { t: 'About the same as the biological range', fb: 'It is a little larger than that. Look at both the shift and the spread of the points.' },
+        { t: 'Larger than the whole biological range, and it also stretches the differences between brains', ok: true, fb: 'The average shift is about −9 points, more than the whole 7-point range of atrophy on A. The spread between brain 1 and brain 6 also grows from about 7 to about 17 points: a stretch (slope about 2.3) as well as a shift. A study that pooled scanners without dealing with this would mix scanner and biology.' }] }),
+    PBS.doTask({ tag: 'Try', title: '4. Take the fingerprint out again',
+      doit: '<b>Do this:</b> keep “Different T1 sequence”, then switch on “Correct yours back onto scanner A’s scale”. Look at the two open points (brains 3 and 5): they were not used to build the correction.',
+      reveal: 'Most of the shift and stretch disappears, even for brains that were not used to fit the correction, because the scanner effect is largely a smooth, repeatable transformation. It is not perfect: the true relationship is slightly curved, so a straight line leaves some error. In a real study this needs people scanned on both scanners (“travelling subjects”) or a statistical method such as ComBat (Lab 2) that estimates shift and stretch from the data, under assumptions.' }),
+    h('details', { class: 'more' }, h('summary', {}, '5. If all my patients and controls are scanned on one scanner, can I ignore all this?'),
+      h('div', { style: { marginTop: '6px' }, html: '<p>Within one scanner a shift and a stretch mostly cancel in a group comparison, and a larger stretch even makes real differences easier to see. It matters when sites are pooled, when patients and controls are scanned at different sites (the confounded design in Lab 2), and when a new person is compared with a reference built on other scanners. In the last case the scanner effect lands directly in the z-score and centile. Case H in the Case conference lab is exactly that.</p>' })));
+  root.append(tasks);
+  root.append(PBS.takeaway([
+    'A scanner leaves a fingerprint on the numbers, not only on the picture, and the shift can be as large as the biology you want to measure.',
+    'Which scanner property matters depends on the measure: contrast for a tissue fraction, resolution for thin structures, coil bias for left–right differences.',
+    'Much of the fingerprint is a shift and a stretch (Lab 2), so it can be estimated and removed, using travelling subjects or a method such as ComBat, under assumptions.',
+    'A reference model built on some scanners will move every z-score for a person scanned somewhere else, which is why the site has to be part of the model.']));
+  root.append(h('p', { class: 'src', html: 'Brain: ICBM152 2009a nonlinear symmetric T1 template (average of 152 healthy young adults); Fonov et al. (2009), NeuroImage 47, S102; Fonov et al. (2011), NeuroImage 54, 313–327; copyright 1993–2004 Louis Collins, McConnell Brain Imaging Centre, Montreal Neurological Institute, McGill University, used under its permission to copy and distribute. Scanner effects, atrophy and measurements are simulated for teaching and are much simpler than a real pipeline. Real travelling-subject studies: Han et al. (2006), NeuroImage 32, 180–194; Jovicich et al. (2009), NeuroImage 46, 177–192. ComBat: Johnson et al. (2007), Biostatistics 8, 118–127; Fortin et al. (2018), NeuroImage 167, 104–120.' }));
+
+  PBS.frame('fingerprint', root);
+  window.__lab = { S, SCAN_A, PRESETS, setParams, refresh, get: () => ({ resA, resY, fit }), measure, scan, B, share, lr, tasksEl: tasks, root };
+  B.load().then(() => {
+    prepTrav(); prepDisplay(); stage.hidden = false; document.getElementById('loading').remove(); refresh(true);
+    window.__ready = true;
+  }).catch((e) => { document.getElementById('loading').textContent = 'The template brain could not be loaded: ' + e.message; });
+})();
+</script>
+</body>
+</html>

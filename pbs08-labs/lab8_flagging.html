@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flagging lab – PBS08</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .ctlgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 22px; }
+  @media (max-width: 1000px) { .ctlgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 620px) { .ctlgrid { grid-template-columns: minmax(0, 1fr); } }
+  .seg.chips { border: 0; gap: 6px; border-radius: 0; overflow: visible; margin-top: 4px; }
+  .seg.chips button { border: 1.5px solid var(--rose); border-radius: 8px; font-size: 13.5px; padding: 4px 9px; }
+  .seg.chips button:last-child { border-right: 1.5px solid var(--rose); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14.5px; margin-top: 10px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend svg { width: 14px; height: 14px; }
+  .tiles4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 8px; }
+  .formula { font-size: 16.5px; }
+  .formula b { color: var(--coral-ink); }
+</style>
+</head>
+<body>
+<div class="wrap" id="root">
+  <noscript><p class="callout">These labs need JavaScript. Please enable it and reload.</p></noscript>
+</div>
+<script src="shared.js"></script>
+<script>
+(function () {
+  const { h, s, f } = PBS;
+  const root = document.getElementById('root');
+  const small = window.innerWidth < 700;
+
+  /* ---------------------------------------------------------------- model
+     Scores are z-scores from a normative model. Healthy people: N(0, 1). People with the condition:
+     N(-d, sd). A person is flagged when their z-score is below the cut-off (a chosen centile). */
+  const S = { d: 0.8, sd: 1, prev: 10, q: 5, scale: false };
+  const Phi = PBS.normCdf, Pdf = PBS.normPdf;
+  function calc(p) {
+    const thr = PBS.normInv(p.q / 100);
+    const sens = Phi((thr + p.d) / p.sd), fpr = Phi(thr), spec = 1 - fpr, pr = p.prev / 100;
+    const ppv = pr * sens / (pr * sens + (1 - pr) * fpr), npv = (1 - pr) * spec / ((1 - pr) * spec + pr * (1 - sens));
+    const auc = Phi(p.d / Math.sqrt(1 + p.sd * p.sd));
+    return { thr, sens, spec, fpr, ppv, npv, auc, flagged: pr * sens + (1 - pr) * fpr };
+  }
+  let C = calc(S);
+
+  root.append(
+    h('h1', {}, 'Flagging lab'),
+    h('p', { class: 'sub' }, 'A normative model gives each person a z-score. To use it as a tool, someone has to choose a cut-off and flag everyone below it. See who is caught, who is missed, and who is flagged by mistake.'),
+    h('div', { class: 'callout' }, 'Everything here is simulated. People with a condition have z-scores that are on average lower than healthy people’s. Healthy people have z-scores that follow a standard normal curve, by definition of a normative model.'));
+
+  /* controls */
+  const slD = PBS.slider({ id: 'eff', label: 'How different are patients? (effect size)', min: 0, max: 2.5, step: 0.05, value: S.d, fmt: (v) => f(v, 2), hint: 'Average z-score of patients is minus this value.', onInput: (v) => { S.d = v; update(); } });
+  const slS = PBS.slider({ id: 'het', label: 'How varied are patients? (spread)', min: 0.8, max: 2.5, step: 0.05, value: S.sd, fmt: (v) => f(v, 2), hint: '1 = as varied as healthy people. Higher: some patients far out, some not at all.', onInput: (v) => { S.sd = v; update(); } });
+  const slP = PBS.slider({ id: 'prev', label: 'How common is the condition in the people tested?', min: 0.5, max: 50, step: 0.5, value: S.prev, fmt: (v) => f(v, 1) + '%', onInput: (v) => { S.prev = v; prevSeg.set(null); update(); } });
+  const prevSeg = PBS.seg({ label: 'Prevalence examples', value: 10, options: [{ v: 1, label: 'Screen everyone (1%)' }, { v: 10, label: 'Referred (10%)' }, { v: 30, label: 'Selected clinic (30%)' }], onChange: (v) => { S.prev = v; slP.set(v); update(); } });
+  prevSeg.classList.add('chips');
+  const slQ = PBS.slider({ id: 'cut', label: 'Cut-off: flag people below the', min: 1, max: 40, step: 0.5, value: S.q, fmt: (v) => PBS.ord(v) + ' centile', hint: '', onInput: (v) => { S.q = v; update(); } });
+  const cutHint = h('div', { class: 'hint', id: 'cuthint' });
+  slQ.append(cutHint);
+  const tiles = h('div', { class: 'tiles4', id: 'tiles', 'aria-live': 'polite' });
+  const ctlCard = PBS.card('Set up the tool', [h('div', { class: 'ctlgrid' }, slD, slS, h('div', {}, slP, prevSeg), slQ), tiles]);
+  root.append(ctlCard);
+  const tile = (k, v, sub, c) => h('div', { class: 'stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v' + (c ? ' coral' : '') }, v), sub ? h('div', { class: 'small', style: { fontSize: '12.5px', lineHeight: '1.25', marginTop: '2px' } }, sub) : null);
+
+  /* distribution chart and ROC */
+  const distHost = h('div', {}), rocHost = h('div', {});
+  const scaleT = PBS.toggle({ id: 'scale', label: 'Size the curves by how many people are in each group', value: S.scale, onChange: (v) => { S.scale = v; update(); } });
+  root.append(h('div', { class: 'cols2', style: { marginBottom: '20px' } },
+    PBS.card('Two groups and a cut-off', [h('p', { class: 'small' }, 'Curves show z-scores. People to the left of the dashed line are flagged.'), distHost, h('div', { class: 'ctl', style: { marginTop: '8px', marginBottom: 0 } }, scaleT),
+      h('div', { class: 'legend' }, h('span', {}, svgDot('var(--rose)', 'var(--rose)', 0.35), 'healthy people'), h('span', {}, svgDot('var(--coral)', 'var(--coral)', 0.5), 'people with the condition'), h('span', {}, svgDot('var(--orange)', 'var(--orange)', 0.8), 'healthy people flagged'))]),
+    PBS.card('ROC curve: every possible cut-off', [h('p', { class: 'small' }, 'Each point on the curve is one cut-off. The dot is yours. The curve does not depend on how common the condition is.'), rocHost, h('div', { class: 'small', id: 'auc', style: { marginTop: '4px' } })])));
+  function svgDot(fill, stroke, op) { return s('svg', { viewBox: '0 0 14 14' }, s('rect', { x: 1, y: 1, width: 12, height: 12, rx: 2, fill, 'fill-opacity': op, stroke, 'stroke-width': 1.3 })); }
+
+  const XL = -5, XR = 3.6;
+  const chD = PBS.chart(distHost, { w: 560, h: 330, m: { l: 20, r: 14, t: 14, b: 52 }, xd: [XL, XR], yd: [0, 1], xt: [-4, -3, -2, -1, 0, 1, 2, 3], yt: [], yaxis: false, xfmt: (v) => (v < 0 ? '−' + (-v) : String(v)), xlabel: 'z-score from the normative model', label: 'Score distributions of healthy people and patients, with a cut-off' });
+  const chR = PBS.chart(rocHost, { w: 420, h: 330, m: { l: 58, r: 16, t: 14, b: 50 }, xd: [0, 1], yd: [0, 1], xt: [0, 0.25, 0.5, 0.75, 1], yt: [0, 0.25, 0.5, 0.75, 1], xfmt: (v) => Math.round(v * 100) + '%', yfmt: (v) => Math.round(v * 100) + '%', xlabel: 'Healthy people flagged', ylabel: 'Patients flagged', label: 'ROC curve' });
+
+  function drawDist() {
+    const L = chD.layer(), g = s('g', { 'clip-path': chD.clip }); L.append(g);
+    const pr = S.prev / 100, wH = S.scale ? 1 - pr : 1, wP = S.scale ? pr : 1;
+    const xs = []; for (let i = 0; i <= 260; i++) xs.push(XL + (XR - XL) * i / 260);
+    const hy = (x) => Pdf(x) * wH, py = (x) => Pdf((x + S.d) / S.sd) / S.sd * wP;
+    const ymax = Math.max(...xs.map((x) => Math.max(hy(x), py(x)))) * 1.12;
+    const Y = (v) => chD.m.t + chD.ih - v / ymax * chD.ih;
+    const path = (fn, upto) => { const pts = xs.filter((x) => x <= upto); if (!pts.length) return ''; return pts.map((x, i) => (i ? 'L' : 'M') + chD.x(x).toFixed(1) + ' ' + Y(fn(x)).toFixed(1)).join('') + `L${chD.x(upto)} ${Y(fn(upto))}L${chD.x(upto)} ${Y(0)}L${chD.x(pts[0])} ${Y(0)}Z`; };
+    const full = (fn) => xs.map((x, i) => (i ? 'L' : 'M') + chD.x(x).toFixed(1) + ' ' + Y(fn(x)).toFixed(1)).join('');
+    g.append(s('path', { d: path(hy, XR), fill: 'var(--rose)', 'fill-opacity': 0.28 }));
+    g.append(s('path', { d: path(py, XR), fill: 'var(--coral)', 'fill-opacity': 0.22 }));
+    g.append(s('path', { d: path(hy, C.thr), fill: 'var(--orange)', 'fill-opacity': 0.8 }));
+    g.append(s('path', { d: path(py, C.thr), fill: 'var(--coral)', 'fill-opacity': 0.6 }));
+    g.append(s('path', { d: full(hy), fill: 'none', stroke: 'var(--muted)', 'stroke-width': 2 }));
+    g.append(s('path', { d: full(py), fill: 'none', stroke: 'var(--coral-ink)', 'stroke-width': 2.4 }));
+    const tx = chD.x(C.thr);
+    L.append(s('line', { x1: tx, x2: tx, y1: chD.m.t, y2: chD.m.t + chD.ih, stroke: 'var(--ink)', 'stroke-width': 2, 'stroke-dasharray': '6 4' }));
+    L.append(s('text', { class: 'note', x: tx - 6, y: chD.m.t + 14, 'text-anchor': 'end', text: 'flagged', style: 'font-weight:700' }));
+    L.append(s('text', { class: 'note', x: tx + 6, y: chD.m.t + 14, text: 'not flagged', style: 'font-weight:700' }));
+  }
+  function drawRoc() {
+    const L = chR.layer(), g = s('g', { 'clip-path': chR.clip }); L.append(g);
+    g.append(s('line', { x1: chR.x(0), y1: chR.y(0), x2: chR.x(1), y2: chR.y(1), stroke: 'var(--muted)', 'stroke-width': 1.4, 'stroke-dasharray': '5 4' }));
+    const pts = []; for (let z = -6; z <= 6.001; z += 0.05) pts.push([Phi(z), Phi((z + S.d) / S.sd)]);
+    g.append(s('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + chR.x(p[0]).toFixed(1) + ' ' + chR.y(p[1]).toFixed(1)).join(''), fill: 'none', stroke: 'var(--coral)', 'stroke-width': 3 }));
+    L.append(s('circle', { cx: chR.x(C.fpr), cy: chR.y(C.sens), r: 7, fill: 'var(--coral-ink)', stroke: 'var(--card)', 'stroke-width': 2.2 }));
+    L.append(s('text', { class: 'note', x: chR.x(0.98), y: chR.y(0.07), 'text-anchor': 'end', text: 'chance (no information)', style: 'font-size:12.5px;fill:var(--muted)' }));
+    document.getElementById('auc').innerHTML = 'Area under the curve: <b>' + f(C.auc, 2) + '</b> (0.50 is chance, 1.00 is perfect). Your cut-off: catches <b>' + Math.round(C.sens * 100) + '%</b> of patients and flags <b>' + f(C.fpr * 100, 1) + '%</b> of healthy people.';
+  }
+
+  /* the thousand people */
+  const waffle = h('div', { id: 'waffle' });
+  const sent = h('div', { class: 'callout soft formula', id: 'sent', style: { marginTop: '12px', marginBottom: 0 }, 'aria-live': 'polite' });
+  const lg = h('div', { class: 'legend' });
+  const dotKey = (fill, stroke, txt) => h('span', {}, s('svg', { viewBox: '0 0 14 14' }, s('circle', { cx: 7, cy: 7, r: 5.5, fill, stroke, 'stroke-width': 1.6 })), txt);
+  lg.append(dotKey('var(--coral)', 'var(--coral)', 'flagged, has the condition'), dotKey('none', 'var(--coral)', 'flagged, healthy (false alarm)'), dotKey('var(--blue)', 'var(--blue)', 'not flagged, has the condition (missed)'), dotKey('none', 'var(--rose)', 'not flagged, healthy'));
+  root.append(PBS.card('The same tool in 1,000 people', [h('p', { class: 'small' }, 'Expected numbers. The top rows are everyone the tool flags; look at how many of them are filled.'), waffle, lg, sent]));
+
+  function drawWaffle() {
+    const N = 1000, cases = Math.round(S.prev / 100 * N), TP = Math.round(cases * C.sens), FN = cases - TP, healthy = N - cases, FP = Math.round(healthy * C.fpr), TN = healthy - FP;
+    PBS.clear(waffle);
+    const cols = small ? 25 : 50, cell = small ? 14 : 16, F0 = TP + FP, rowsF = Math.ceil(F0 / cols), rowsN = Math.ceil((FN + TN) / cols), gap = 12;
+    const W = cols * cell, Hh = (rowsF + rowsN) * cell + gap + 2;
+    const svg = s('svg', { viewBox: `0 0 ${W} ${Hh}`, class: 'chart', role: 'img', 'aria-label': 'Expected result of the tool in 1000 people: ' + TP + ' true flags, ' + FP + ' false alarms, ' + FN + ' missed, ' + TN + ' correctly not flagged' });
+    const seq = [].concat(Array(TP).fill(0), Array(FP).fill(1)), seq2 = [].concat(Array(FN).fill(2), Array(TN).fill(3));
+    const sty = [['var(--coral)', 'var(--coral)'], ['none', 'var(--coral)'], ['var(--blue)', 'var(--blue)'], ['none', 'var(--rose)']];
+    const put = (arr, y0) => arr.forEach((k, i) => { const r = Math.floor(i / cols), c = i % cols; svg.append(s('circle', { cx: c * cell + cell / 2, cy: y0 + r * cell + cell / 2, r: cell / 2 - 2.2, fill: sty[k][0], stroke: sty[k][1], 'stroke-width': k === 3 ? 1 : 1.5, 'stroke-opacity': k === 3 ? 0.7 : 1 })); });
+    put(seq, 1); put(seq2, 1 + rowsF * cell + gap);
+    if (F0 > 0) svg.append(s('line', { x1: 0, x2: W, y1: rowsF * cell + gap / 2 + 1, y2: rowsF * cell + gap / 2 + 1, stroke: 'var(--grid)', 'stroke-width': 1.5 }));
+    waffle.append(svg);
+    const F = TP + FP, NF = FN + TN;
+    sent.innerHTML = 'Out of 1,000 people, <b>' + cases + '</b> have the condition. The tool flags <b>' + F + '</b>: <b>' + TP + '</b> have the condition and <b>' + FP + '</b> do not. Of the <b>' + NF + '</b> people not flagged, <b>' + FN + '</b> do have the condition. ' + (F ? 'So of 100 people flagged, about <b>' + Math.round(TP / F * 100) + '</b> have the condition.' : 'Nobody is flagged at this cut-off.');
+  }
+  function drawTiles() {
+    PBS.clear(tiles);
+    const pc = (v) => (isFinite(v) ? Math.round(v * 100) + '%' : '–');
+    tiles.append(tile('Sensitivity', pc(C.sens), 'patients flagged', true), tile('Specificity', pc(C.spec), 'healthy not flagged'), tile('Positive predictive value', pc(C.ppv), 'flagged who have it', true), tile('Negative predictive value', pc(C.npv), 'not flagged who are healthy'), tile('Flagged overall', f(C.flagged * 100, 1) + '%', 'of everyone tested'));
+    document.getElementById('cuthint').textContent = 'A z-score below ' + f(C.thr, 2) + '. About ' + f(S.q, 1) + '% of healthy people fall below it.';
+  }
+  function update() { C = calc(S); drawTiles(); drawDist(); drawRoc(); drawWaffle(); }
+
+  /* ---------------------------------------------------------------- tasks */
+  const tasks = h('div', { class: 'tasks', style: { marginTop: '26px' } },
+    h('h2', {}, 'Guided tasks'),
+    h('p', { class: 'small' }, 'Start with effect size 0.80, spread 1.00, prevalence 10% (“Referred”) and the 5th centile cut-off.'),
+    PBS.task({ tag: 'Predict', title: '1. With those settings, what share of patients does the tool flag (sensitivity)?',
+      options: [{ t: 'About 95%', fb: '95% is the specificity: the share of healthy people who are not flagged. The 5th centile cut-off flags only 5% of them.' }, { t: 'About 20%', ok: true, fb: 'The average patient sits 0.8 SD below average, which is not far past the cut-off at −1.65. Only about one patient in five falls below it. A tool can have excellent specificity and still miss most patients.' }, { t: 'About 50%', fb: 'That would need the average patient to sit exactly on the cut-off.' }] }),
+    PBS.doTask({ tag: 'Try', title: '2. Trade sensitivity against specificity', doit: '<b>Do this:</b> move the cut-off from the 5th to the 25th centile. Watch sensitivity, specificity and positive predictive value.',
+      reveal: 'Sensitivity rises to about 55%, but specificity falls to 75% and the positive predictive value falls too, because many more healthy people are flagged. Moving the cut-off moves you along the ROC curve: you gain one and lose the other.' }),
+    PBS.task({ tag: 'Predict', title: '3. Set prevalence to 1% (“Screen everyone”) and the cut-off back to the 5th centile. A person is flagged. How likely is it that they have the condition?',
+      options: [{ t: 'About 95%', fb: 'Specificity is 95%, but that is the share of healthy people who are not flagged, which is a different question.' }, { t: 'About 20%', fb: 'That is the sensitivity. The question is about the flagged person, not the patients.' }, { t: 'About 4%', ok: true, fb: 'Of 1,000 people, 10 have the condition and about 2 are flagged. Of the 990 healthy, about 50 are flagged. So 2 out of 52 flagged people, about 4%, have it. Most flags are false alarms.' }] }),
+    PBS.doTask({ tag: 'Try', title: '4. Can a huge effect rescue a rare condition?', doit: '<b>Do this:</b> keep prevalence at 1%, the cut-off at the 5th centile, and set the effect size to 2.0.',
+      reveal: 'Sensitivity rises to about 64%, but the positive predictive value is still only about 11%: roughly nine flags in ten are false alarms. With a rare condition, even a very good tool produces mostly false alarms unless the cut-off is much stricter.' }),
+    PBS.task({ tag: 'Predict', title: '5. Move prevalence from 1% to 30% with everything else fixed. What happens to the dot on the ROC curve?',
+      options: [{ t: 'It does not move', ok: true, fb: 'Sensitivity and specificity are properties of the tool and the two groups. Prevalence changes who is in the room, which changes the positive predictive value, not the ROC point.' }, { t: 'It moves up and left', fb: 'The ROC point is made from sensitivity and specificity, and these do not depend on how common the condition is.' }, { t: 'It moves along the diagonal', fb: 'It stays where it is. Check the tiles: sensitivity and specificity do not change, while the positive predictive value does.' }] }),
+    PBS.doTask({ tag: 'Try', title: '6. Varied patients', doit: '<b>Do this:</b> set effect size 0.80, cut-off the 5th centile, prevalence 10%, then raise patient spread from 1.0 to 2.0. Watch sensitivity and the area under the curve.',
+      reveal: 'Sensitivity at the 5th centile rises from about 20% to about 34%, because the widest patients reach far into the tail. The overall separation (area under the curve) falls from about 0.71 to 0.64, because many patients now overlap healthy people. If only a subset of patients is strongly affected, as in the same-average lab, a strict cut-off finds that subset but misses the rest.' }));
+  root.append(tasks);
+  root.append(PBS.takeaway([
+    'Sensitivity and specificity come from the tool and the two groups: effect size, spread and cut-off. They trade off along the ROC curve.',
+    'The positive predictive value also depends on how common the condition is. When it is rare, most flags are false alarms, even for a good tool.',
+    'A normative deviation is a flag for a closer look. Whether it helps depends on the question asked, the cut-off, and who is tested.']));
+  root.append(h('p', { class: 'src' }, 'Simulated, idealised normal distributions. Prevalence examples are illustrative and not figures from real services.'));
+
+  PBS.frame('flagging', root);
+  update();
+  window.__lab = { S, calc, update };
+})();
+</script>
+</body>
+</html>

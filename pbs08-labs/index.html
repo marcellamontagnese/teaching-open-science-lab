@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PBS08 online labs</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 30px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .lcard { display: flex; flex-direction: column; border: 1.25px solid var(--rose); border-radius: 10px; background: var(--card); overflow: hidden; min-width: 0; }
+  .lcard .top { background: var(--pink); padding: 10px 16px; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .lcard .num { font-weight: 800; font-size: 14px; letter-spacing: .05em; text-transform: uppercase; color: var(--coral-ink); }
+  .lcard .meta { font-size: 13.5px; color: var(--muted); font-weight: 700; }
+  .lcard .inner { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .lcard h2 { margin: 0; font-size: 23px; }
+  .lcard .subt { font-weight: 700; color: var(--coral-ink); margin: -2px 0 2px; }
+  .lcard p { margin: 0; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 6px; }
+  .tags span { font-size: 13px; border: 1px solid var(--rose); border-radius: 99px; padding: 1px 10px; color: var(--muted); }
+  .open { align-self: flex-start; margin-top: 8px; text-decoration: none; display: inline-block; }
+  h2.sec { font-size: 24px; margin: 30px 0 4px; }
+  p.secsub { color: var(--muted); margin: 0 0 14px; max-width: 75ch; }
+  ol.route { margin: 6px 0 0; padding-left: 22px; }
+  ol.route li { margin-bottom: 6px; }
+  .foot { margin-top: 34px; padding-top: 14px; border-top: 1px solid var(--grid); font-size: 14.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap" id="root">
+  <noscript><p class="callout">These labs need JavaScript. Please enable it and reload.</p></noscript>
+</div>
+<script src="shared.js"></script>
+<script>
+(function () {
+  const { h } = PBS;
+  const root = document.getElementById('root');
+  root.append(
+    h('div', { class: 'topbar' }, h('div', { class: 'crumbs' }, h('strong', {}, 'PBS08 Large-Scale Neuroimaging and Normative Modelling')), h('div', {}, h('span', { class: 'pill' }, 'Michaelmas 2026'))),
+    h('h1', {}, 'Online labs'),
+    h('p', { class: 'sub' }, 'Eight interactive labs to go with Lectures 2 and 6. Each one gives you something to build or change, then a short set of tasks: predict first, try it, and read what to notice.'),
+    h('div', { class: 'callout' }, 'Everything runs in your browser and nothing you do is sent anywhere or saved. The data are simulated. Labs 3 and 7 draw on a real MRI template (the open ICBM152 average brain), but the scanners, the atrophy and the people are simulated. Lab 6 sends you to the real Brain Charts web app. Each lab takes between 15 and 30 minutes, and they work on a phone as well as a laptop.'));
+
+  const card = (l) => h('article', { class: 'lcard' },
+    h('div', { class: 'top' }, h('span', { class: 'num' }, 'Lab ' + l.n), h('span', { class: 'meta' }, l.lecture + ' · ' + l.time)),
+    h('div', { class: 'inner' }, h('h2', {}, l.title), h('div', { class: 'subt' }, l.sub), h('p', {}, l.blurb),
+      h('a', { class: 'btn open', href: l.file }, 'Open lab ' + l.n), h('div', { class: 'tags' }, l.tags.map((t) => h('span', {}, t)))));
+
+  const L2 = PBS.LABS.filter((l) => l.n <= 7), L6 = PBS.LABS.filter((l) => l.n === 8);
+  root.append(
+    h('h2', { class: 'sec' }, 'Lecture 2: large-scale neuroimaging and normative modelling'),
+    h('p', { class: 'secsub' }, 'From pooling many scanners and sites, to growth charts, z-scores, centiles and reading a deviation map.'),
+    h('div', { class: 'grid' }, L2.map(card)),
+    h('h2', { class: 'sec' }, 'Looking ahead to Lecture 6: clinical assessment tools'),
+    h('p', { class: 'secsub' }, 'What happens when a deviation score is turned into a flag.'),
+    h('div', { class: 'grid' }, L6.map(card)),
+    h('section', { class: 'card' }, h('div', { class: 'head' }, h('span', {}, 'A suggested route')),
+      h('div', { class: 'body' }, h('ol', { class: 'route' },
+        h('li', { html: '<b>Before or during the first half of Lecture 2:</b> Lab 1 (sampling), Lab 2 (scanners and harmonisation), then Lab 3 (scanner fingerprint) to see where the shift and stretch come from.' }),
+        h('li', { html: '<b>After the second half:</b> Lab 4 (same average, different people), then Lab 5 (centile reader).' }),
+        h('li', { html: '<b>Before Lecture 3 on lifespan brain charts:</b> Lab 6, which takes you to the real Brain Charts app.' }),
+        h('li', { html: '<b>To practise reading deviation maps:</b> Lab 7 (case conference), which uses what you learned in Labs 3 to 6.' }),
+        h('li', { html: '<b>Before Lecture 6:</b> revisit Lab 5 and Lab 7, then do Lab 8 (flagging).' })))));
+  root.append(h('div', { class: 'foot' }, 'Dr Marcella Montagnese, University of Cambridge. The simulations are for teaching: the numbers are chosen to make an idea clear, not to represent any particular study, and the people in Lab 7 are fictional. Brain template in Labs 3 and 7: ICBM152 2009a (Fonov et al., 2009, 2011), McConnell Brain Imaging Centre, Montreal Neurological Institute, McGill University.'));
+})();
+</script>
+</body>
+</html>

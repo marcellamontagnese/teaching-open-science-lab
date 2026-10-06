@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scanner lab – PBS08</title>
+<link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<div class="wrap" id="root">
+  <noscript><p class="callout">These labs need JavaScript. Please enable it and reload.</p></noscript>
+</div>
+<script src="shared.js"></script>
+<script>
+(function () {
+  const { h, s, f } = PBS;
+  const root = document.getElementById('root');
+
+  /* ---------- the world: two scanners, one biology ---------- */
+  const NA = 150, NB = 150, NT = 20, SD_E = 0.30;
+  const BASE = (age) => 4.6 - 0.011 * (age - 20);
+  let seed = 21, pop;
+  function draw() {
+    const r = PBS.rng(seed);
+    const mk = () => ({ age: 20 + 60 * r.u(), u: r.u(), b: 0.28 * r.n(), m: 0.11 * r.n() });
+    pop = { A: Array.from({ length: NA }, mk), B: Array.from({ length: NB }, mk), T: Array.from({ length: NT }, () => ({ age: 20 + 60 * r.u(), b: 0.28 * r.n(), mA: 0.11 * r.n(), mB: 0.11 * r.n() })) };
+  }
+  draw();
+
+  const P = { shift: 0.5, stretch: 1.3, eff: 0.30, imb: 0, protect: true, travel: false, colour: 'site' };
+
+  function buildRows() {
+    const t = P.imb / 100, pA = 0.5 - 0.5 * t, pB = 0.5 + 0.5 * t, R = [];
+    pop.A.forEach((d) => { const dx = d.u < pA ? 1 : 0; R.push({ site: 0, age: d.age, dx, y: BASE(d.age) - P.eff * dx + (d.b + d.m), trav: false }); });
+    pop.B.forEach((d) => { const dx = d.u < pB ? 1 : 0; R.push({ site: 1, age: d.age, dx, y: BASE(d.age) - P.eff * dx + P.shift + P.stretch * (d.b + d.m), trav: false }); });
+    if (P.travel) pop.T.forEach((d, i) => {
+      R.push({ site: 0, age: d.age, dx: 0, y: BASE(d.age) + (d.b + d.mA), trav: true, pid: i });
+      R.push({ site: 1, age: d.age, dx: 0, y: BASE(d.age) + P.shift + P.stretch * (d.b + d.mB), trav: true, pid: i });
+    });
+    return R;
+  }
+
+  /* ---------- analysis ---------- */
+  function fitDx(R, useSite, ys) {
+    const X = R.map((r) => useSite ? [1, r.age, r.dx, r.site] : [1, r.age, r.dx]);
+    const o = PBS.ols(X, ys || R.map((r) => r.y));
+    return o.singular ? null : { est: o.beta[2], se: o.se[2] };
+  }
+  function harmonise(R, protect) {
+    const y = R.map((r) => r.y), idx = [[], []];
+    R.forEach((r, i) => idx[r.site].push(i));
+    if (protect) {
+      const o = PBS.ols(R.map((r) => [1, r.age, r.dx, r.site]), y);
+      if (o.singular) return null;
+      const res = [idx[0].map((i) => o.resid[i]), idx[1].map((i) => o.resid[i])];
+      const s0 = PBS.sd(res[0]), s1 = PBS.sd(res[1]);
+      const sp = Math.sqrt((s0 * s0 * (res[0].length - 1) + s1 * s1 * (res[1].length - 1)) / (R.length - 2));
+      const ys = R.map((r, i) => (o.fitted[i] - o.beta[3] * r.site) + o.resid[i] * sp / (r.site ? s1 : s0));
+      return { ys, shift: o.beta[3], stretch: s1 / s0 };
+    }
+    const g = [idx[0].map((i) => y[i]), idx[1].map((i) => y[i])];
+    const m = [PBS.mean(g[0]), PBS.mean(g[1])], sd = [PBS.sd(g[0]), PBS.sd(g[1])];
+    const sp = Math.sqrt((sd[0] ** 2 * (g[0].length - 1) + sd[1] ** 2 * (g[1].length - 1)) / (R.length - 2)), mAll = PBS.mean(y);
+    const ys = R.map((r, i) => (y[i] - m[r.site]) / sd[r.site] * sp + mAll);
+    return { ys, shift: m[1] - m[0], stretch: sd[1] / sd[0] };
+  }
+  function analyse() {
+    const R = buildRows();
+    const raw = fitDx(R, false), cov = fitDx(R, true);
+    const hm = harmonise(R, P.protect);
+    const hf = hm ? fitDx(R, false, hm.ys) : null;
+    if (hf && P.protect && cov) hf.se = cov.se; // carry the uncertainty of the scanner estimate forward
+    return { R, raw, cov, hm, hf };
+  }
+
+  /* ---------- density helper ---------- */
+  function kde(vals, grid, bw) { const c = 1 / (vals.length * bw * Math.sqrt(2 * Math.PI)); return grid.map((x) => { let sum = 0; for (const v of vals) { const z = (x - v) / bw; sum += Math.exp(-0.5 * z * z); } return sum * c; }); }
+
+  /* ---------- page ---------- */
+  root.append(
+    h('h1', {}, 'Scanner lab'),
+    h('p', { class: 'sub' }, 'The same people give different numbers on different scanners. Here you set the scanner’s shift and stretch, choose how patients and controls are shared between scanners, and see what harmonisation does to the group difference you are trying to measure.'),
+    h('div', { class: 'callout' }, 'The true effect of diagnosis is known, so you can see which analyses recover it. Scanner A is the reference. Scanner B can read higher (shift) and more spread out (stretch).'));
+
+  const scatHost = h('div', {});
+  const colourSeg = PBS.seg({ label: 'Colour by', value: 'site', options: [{ v: 'site', label: 'Scanner' }, { v: 'dx', label: 'Diagnosis' }], onChange: (v) => { P.colour = v; refresh(); } });
+  const denHostA = h('div', {}), denHostB = h('div', {});
+
+  const sh = PBS.slider({ id: 'shift', label: 'Scanner B shift', min: -1, max: 1, step: 0.05, value: P.shift, fmt: (v) => (v > 0 ? '+' : '') + f(v, 2) + ' mL', onInput: (v) => { P.shift = v; refresh(); } });
+  const st = PBS.slider({ id: 'stretch', label: 'Scanner B stretch', min: 0.6, max: 2.0, step: 0.05, value: P.stretch, fmt: (v) => '× ' + f(v, 2), onInput: (v) => { P.stretch = v; refresh(); }, hint: 'Spread of the unexplained variation, relative to scanner A.' });
+  const ef = PBS.slider({ id: 'effect', label: 'True effect of diagnosis', min: 0, max: 0.6, step: 0.05, value: P.eff, fmt: (v) => '−' + f(v, 2) + ' mL', onInput: (v) => { P.eff = v; refresh(); }, hint: 'Patients’ volumes are lower by this amount, at both scanners.' });
+  const imbLabel = (v) => v === 0 ? 'balanced' : v === 100 ? 'fully confounded' : Math.round(50 - v / 2) + '% vs ' + Math.round(50 + v / 2) + '% patients';
+  const im = PBS.slider({ id: 'imb', label: 'Patients at A vs B', min: 0, max: 100, step: 5, value: P.imb, fmt: imbLabel, onInput: (v) => { P.imb = v; refresh(); }, hint: 'Balanced means half of the people at each scanner are patients. Fully confounded means all patients are on B and all controls on A.' });
+  const pr = PBS.toggle({ id: 'protect', label: 'Protect age and diagnosis when estimating scanner effects', value: P.protect, onChange: (v) => { P.protect = v; refresh(); } });
+  const tr = PBS.toggle({ id: 'travel', label: 'Add 20 travelling volunteers (scanned on both)', value: P.travel, onChange: (v) => { P.travel = v; refresh(); } });
+  const newBtn = h('button', { class: 'btn alt sm', id: 'newsample', type: 'button' }, 'New sample');
+  newBtn.addEventListener('click', () => { seed += 1; draw(); refresh(); });
+  const resetBtn = h('button', { class: 'btn alt sm', id: 'reset', type: 'button' }, 'Reset sliders');
+  resetBtn.addEventListener('click', () => { P.shift = 0.5; P.stretch = 1.3; P.eff = 0.3; P.imb = 0; P.protect = true; P.travel = false; sh.set(0.5); st.set(1.3); ef.set(0.3); im.set(0); pr.set(true); tr.set(false); refresh(); });
+  const estHost = h('div', { class: 'scroll-x' });
+
+  root.append(h('div', { class: 'lab wide-controls' },
+    h('div', { class: 'stack' },
+      PBS.card('Volumes against age', [scatHost, h('div', { class: 'row', style: { marginTop: '8px' } }, h('span', { class: 'small' }, 'Colour by'), colourSeg)], null),
+      h('div', { class: 'cols2' }, PBS.card('Raw volumes by scanner', denHostA), PBS.card('After harmonisation', denHostB))),
+    h('div', { class: 'stack' },
+      PBS.card('Set up the study', [sh, st, ef, im, h('div', { class: 'ctl' }, pr), h('div', { class: 'ctl' }, tr), h('div', { class: 'row' }, newBtn, resetBtn)]),
+      PBS.card('Did the scanner’s shift and stretch get found?', estHost))));
+
+  const fHost = h('div', {});
+  const msg = h('div', { class: 'callout soft', id: 'msg', 'aria-live': 'polite', style: { marginTop: '12px', marginBottom: 0 } });
+  root.append(PBS.card('Estimated group difference (patients minus controls, adjusted for age)', [fHost, msg, h('p', { class: 'src' }, 'Bars show estimate ± 1.96 standard errors. When diagnosis is protected, the harmonised row carries the same error bar as the covariate model, because the uncertainty in estimating the scanner effect has to be carried forward. Without protection, the error bar is the plain regression on the adjusted values and is too small. The harmonisation here is simplified: it estimates one shift and one stretch for the scanner, without the empirical-Bayes shrinkage of full ComBat, which pools information across many brain regions.')]));
+
+  /* ---------- charts ---------- */
+  const sc = PBS.chart(scatHost, { w: 760, h: 400, m: { l: 58, r: 16, t: 14, b: 50 }, xd: [15, 85], yd: [2.4, 6.6], xt: [20, 30, 40, 50, 60, 70, 80], yt: [3, 4, 5, 6], xlabel: 'Age (years)', ylabel: 'Hippocampal volume (mL, simulated)', label: 'Scatter of simulated volumes against age' });
+  const gridX = []; for (let v = 2.2; v <= 6.8; v += 0.05) gridX.push(v);
+  const dA = PBS.chart(denHostA, { w: 380, h: 250, m: { l: 14, r: 12, t: 12, b: 44 }, xd: [2.2, 6.8], yd: [0, 1], xt: [3, 4, 5, 6], yt: [], yaxis: false, xlabel: 'Volume (mL)', label: 'Density of raw volumes by scanner' });
+  const dB = PBS.chart(denHostB, { w: 380, h: 250, m: { l: 14, r: 12, t: 12, b: 44 }, xd: [2.2, 6.8], yd: [0, 1], xt: [3, 4, 5, 6], yt: [], yaxis: false, xlabel: 'Volume (mL)', label: 'Density of harmonised volumes by scanner' });
+  const ff = PBS.chart(fHost, { w: 900, h: 300, m: { l: 214, r: 20, t: 12, b: 50 }, xd: [-0.9, 0.5], yd: [0, 3], xt: PBS.ticks(-0.8, 0.4, 0.2), xfmt: (v) => f(v, 1), yt: [], xlabel: 'Estimated difference in volume (mL)', label: 'Estimated group difference for three analyses' });
+
+  function marker(L, kind, cx, cy, fill, extra) {
+    if (kind === 'tri') L.append(s('path', Object.assign({ d: `M${cx} ${cy - 5.5}L${cx + 5.2} ${cy + 4}L${cx - 5.2} ${cy + 4}Z`, fill }, extra)));
+    else if (kind === 'dia') L.append(s('path', Object.assign({ d: `M${cx} ${cy - 5.5}L${cx + 5} ${cy}L${cx} ${cy + 5.5}L${cx - 5} ${cy}Z`, fill }, extra)));
+    else L.append(s('circle', Object.assign({ cx, cy, r: 4, fill }, extra)));
+  }
+  function drawScatter(R) {
+    const L = sc.layer();
+    const byP = {};
+    R.forEach((r) => { if (r.trav) (byP[r.pid] = byP[r.pid] || []).push(r); });
+    Object.values(byP).forEach((pair) => { if (pair.length === 2) L.append(s('line', { x1: sc.x(pair[0].age), x2: sc.x(pair[1].age), y1: sc.y(pair[0].y), y2: sc.y(pair[1].y), stroke: 'var(--muted)', 'stroke-width': 1.3, 'stroke-opacity': 0.8 })); });
+    R.forEach((r) => {
+      const cx = sc.x(r.age), cy = sc.y(Math.max(2.5, Math.min(6.5, r.y)));
+      const ex = r.trav ? { stroke: 'var(--card)', 'stroke-width': 1 } : { 'fill-opacity': 0.8, stroke: 'var(--card)', 'stroke-width': 0.6 };
+      if (P.colour === 'site') marker(L, r.site ? 'tri' : 'circ', cx, cy, r.site ? 'var(--coral)' : 'var(--ink)', ex);
+      else marker(L, r.dx ? 'dia' : 'circ', cx, cy, r.dx ? 'var(--orange)' : 'var(--blue)', ex);
+    });
+    // per-scanner regression lines (colour-by-scanner view)
+    if (P.colour === 'site') [0, 1].forEach((k) => {
+      const sub = R.filter((r) => r.site === k), o = PBS.ols(sub.map((r) => [1, r.age]), sub.map((r) => r.y));
+      if (!o.singular) L.append(s('line', { x1: sc.x(20), x2: sc.x(80), y1: sc.y(o.beta[0] + o.beta[1] * 20), y2: sc.y(o.beta[0] + o.beta[1] * 80), stroke: k ? 'var(--coral)' : 'var(--ink)', 'stroke-width': 2.4, 'stroke-dasharray': k ? '7 4' : '' }));
+    });
+    // legend
+    const lg = P.colour === 'site' ? [['circ', 'var(--ink)', 'Scanner A'], ['tri', 'var(--coral)', 'Scanner B']] : [['circ', 'var(--blue)', 'Control'], ['dia', 'var(--orange)', 'Patient']];
+    lg.forEach(([k, c, t], i) => { marker(L, k, sc.m.l + 16 + i * 120, sc.m.t + 16, c); L.append(s('text', { class: 'note', x: sc.m.l + 28 + i * 120, y: sc.m.t + 21, text: t })); });
+    if (P.travel) L.append(s('text', { class: 'note', x: sc.m.l + sc.iw - 6, y: sc.m.t + 21, 'text-anchor': 'end', fill: 'var(--muted)', text: 'grey lines: the same person on both scanners' }));
+  }
+  function drawDensity(chart, R, ys, title) {
+    const L = chart.layer();
+    if (!ys) { L.append(s('text', { class: 'note', x: chart.m.l + (chart.iw) / 2, y: chart.m.t + chart.ih / 2 - 6, 'text-anchor': 'middle', text: 'Cannot be done:' }), s('text', { class: 'note', x: chart.m.l + chart.iw / 2, y: chart.m.t + chart.ih / 2 + 16, 'text-anchor': 'middle', text: 'diagnosis and scanner are one variable' })); return; }
+    const vA = [], vB = []; R.forEach((r, i) => (r.site ? vB : vA).push(ys[i]));
+    const dens = [kde(vA, gridX, 0.17), kde(vB, gridX, 0.17)];
+    const mx = Math.max(...dens[0], ...dens[1]) * 1.12;
+    [0, 1].forEach((k) => {
+      let d = ''; gridX.forEach((x, i) => { d += (i ? 'L' : 'M') + chart.x(x).toFixed(1) + ' ' + (chart.m.t + chart.ih - dens[k][i] / mx * chart.ih).toFixed(1); });
+      L.append(s('path', { d: d + `L${chart.x(gridX[gridX.length - 1]).toFixed(1)} ${chart.m.t + chart.ih}L${chart.x(gridX[0]).toFixed(1)} ${chart.m.t + chart.ih}Z`, fill: k ? 'var(--coral)' : 'var(--ink)', 'fill-opacity': 0.13, stroke: 'none' }));
+      L.append(s('path', { d, fill: 'none', stroke: k ? 'var(--coral)' : 'var(--ink)', 'stroke-width': 2.6, 'stroke-dasharray': k ? '7 4' : '' }));
+      const m = PBS.mean(k ? vB : vA);
+      L.append(s('line', { x1: chart.x(m), x2: chart.x(m), y1: chart.m.t + 30, y2: chart.m.t + chart.ih, stroke: k ? 'var(--coral)' : 'var(--ink)', 'stroke-width': 1.2, 'stroke-opacity': 0.7 }));
+    });
+    L.append(s('line', { x1: chart.m.l + 2, x2: chart.m.l + 26, y1: chart.m.t + 10, y2: chart.m.t + 10, stroke: 'var(--ink)', 'stroke-width': 2.6 }), s('text', { class: 'note', x: chart.m.l + 31, y: chart.m.t + 14, text: 'A' }), s('line', { x1: chart.m.l + 56, x2: chart.m.l + 80, y1: chart.m.t + 10, y2: chart.m.t + 10, stroke: 'var(--coral)', 'stroke-width': 2.6, 'stroke-dasharray': '7 4' }), s('text', { class: 'note', x: chart.m.l + 85, y: chart.m.t + 14, text: 'B' }), s('text', { class: 'tick', x: chart.m.l + 112, y: chart.m.t + 14, text: 'thin lines: means' }));
+  }
+  function drawForest(res) {
+    const L = ff.layer();
+    L.append(s('line', { x1: ff.x(-P.eff), x2: ff.x(-P.eff), y1: ff.m.t, y2: ff.m.t + ff.ih, stroke: 'var(--coral)', 'stroke-width': 2.4 }));
+    L.append(s('text', { class: 'note', x: ff.x(-P.eff) + (P.eff > 0.4 ? -6 : 6), y: ff.m.t + ff.ih - 8, 'text-anchor': P.eff > 0.4 ? 'end' : 'start', fill: 'var(--coral-ink)', style: 'font-weight:700', text: 'true effect ' + f(-P.eff, 2) }));
+    L.append(s('line', { x1: ff.x(0), x2: ff.x(0), y1: ff.m.t, y2: ff.m.t + ff.ih, stroke: 'var(--muted)', 'stroke-width': 1.2, 'stroke-dasharray': '4 4' }));
+    const rows = [['Raw: ignore the scanner', res.raw], ['Scanner as a covariate', res.cov], ['Harmonised (' + (P.protect ? 'protected' : 'not protected') + ')', res.hf]];
+    rows.forEach(([lab, v], i) => {
+      const yy = ff.y(2.5 - i);
+      L.append(s('text', { class: 'axl', x: ff.m.l - 12, y: yy + 5, 'text-anchor': 'end', text: lab }));
+      if (!v) { L.append(s('text', { class: 'note', x: ff.m.l + 14, y: yy + 5, fill: 'var(--bad)', style: 'font-weight:700', text: 'cannot be estimated: diagnosis = scanner' })); return; }
+      const lo = v.est - 1.96 * v.se, hi = v.est + 1.96 * v.se;
+      L.append(s('line', { x1: ff.x(Math.max(-0.9, lo)), x2: ff.x(Math.min(0.5, hi)), y1: yy, y2: yy, stroke: 'var(--ink)', 'stroke-width': 3, 'stroke-linecap': 'round' }));
+      L.append(s('rect', { x: ff.x(v.est) - 6, y: yy - 6, width: 12, height: 12, fill: 'var(--ink)' }));
+      L.append(s('text', { class: 'note', x: ff.x(Math.min(0.5, hi)) - 2, y: yy - 12, 'text-anchor': 'end', style: 'font-weight:700', text: f(v.est, 2) + '  [' + f(lo, 2) + ', ' + f(hi, 2) + ']' }));
+    });
+  }
+
+  function refresh() {
+    const res = analyse();
+    drawScatter(res.R);
+    drawDensity(dA, res.R, res.R.map((r) => r.y));
+    drawDensity(dB, res.R, res.hm ? res.hm.ys : null);
+    drawForest(res);
+    // estimates table
+    PBS.clear(estHost);
+    const row = (a, b, c) => h('tr', {}, h('td', {}, a), h('td', { class: 'n' }, b), h('td', { class: 'n' }, c));
+    estHost.append(h('table', { class: 't' },
+      h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', { class: 'n' }, 'True'), h('th', { class: 'n' }, 'Estimated'))),
+      h('tbody', {}, row('Shift of B', (P.shift > 0 ? '+' : '') + f(P.shift, 2), res.hm ? (res.hm.shift > 0 ? '+' : '') + f(res.hm.shift, 2) : '–'), row('Stretch of B', '× ' + f(P.stretch, 2), res.hm ? '× ' + f(res.hm.stretch, 2) : '–'))));
+    estHost.append(h('p', { class: 'small', style: { marginTop: '8px' } }, res.hm ? (P.protect ? 'Estimated after removing the effects of age and diagnosis, so only the scanner is left.' : 'Estimated from raw scanner means and spreads. Any difference in who was scanned counts as scanner effect.') : 'Scanner and diagnosis are the same variable, so the scanner’s effect cannot be separated from the disease.'));
+    // message
+    let t;
+    const bias = res.raw ? res.raw.est - (-P.eff) : 0;
+    if (P.imb === 100 && P.travel) t = 'The 20 travelling volunteers are the same people on both scanners, so they show the scanner’s offset directly. Scanner and diagnosis are no longer the same variable, and the covariate model can run. The estimate (' + f(res.cov ? res.cov.est : 0, 2) + ') is rough because only 20 people carry the information about the scanner.';
+    else if (P.imb === 100 && !P.travel) t = 'Every patient is on scanner B and every control on scanner A. The raw difference (' + f(res.raw.est, 2) + ') is the disease effect plus the scanner shift. You cannot add scanner as a covariate, and a harmonisation that protects diagnosis cannot run. Harmonising without protection removes scanner and disease together, leaving ' + f(res.hf ? res.hf.est : 0, 2) + '. Try adding travelling volunteers.';
+    else if (P.imb === 0) t = 'The design is balanced, so the scanner shift cancels in the group comparison and the raw estimate is close to the truth (error ' + f(bias, 2) + '). ' + (res.hf && res.hf.se < res.raw.se * 0.97 ? 'Harmonising narrows the error bar a little, because the scanner shift no longer adds variation.' : 'Harmonising barely changes the error bar: it makes the scanners comparable, but it cannot add precision.');
+    else t = 'Patients are scanned more on B than on A. The raw estimate is off by ' + f(bias, 2) + ' mL (true ' + f(-P.eff, 2) + ', estimated ' + f(res.raw.est, 2) + '). ' + (P.protect ? 'Protecting diagnosis lets the method separate scanner from disease, so the harmonised estimate stays close to the truth.' : 'Without protection, the method treats the whole difference between scanners as scanner effect, and removes real disease effect with it.');
+    msg.textContent = t;
+  }
+
+  /* ---------- tasks ---------- */
+  const tasks = h('div', { class: 'tasks', style: { marginTop: '22px' } },
+    h('h2', {}, 'Guided tasks'),
+    h('p', { class: 'small' }, 'Press “Reset sliders” before each task. Predict first, then change the controls and check.'),
+    PBS.task({ tag: 'Predict', title: '1. Balanced design, scanner B reads +0.5 mL higher. Without any correction, is the group difference biased?',
+      options: [{ t: 'Yes, biased toward zero', fb: 'Only if more patients were on one scanner. Here, half of the people at each scanner are patients.' }, { t: 'Yes, biased away from zero', fb: 'Only if more patients were on one scanner.' },
+        { t: 'No, but the estimate is noisier', ok: true, fb: 'Patients and controls are spread equally over both scanners, so the shift cancels in the comparison. The cost is a wider error bar. Compare the bars for “Raw” and “Harmonised”.' }, { t: 'It depends on the age range', fb: 'Age is controlled in every row. The scanner is the issue here, and with a balanced design its shift cancels.' }] }),
+    PBS.task({ tag: 'Predict, then slide', title: '2. Slide the patient share to 60 (20% patients at A, 80% at B). What happens to the raw estimate?',
+      body: '<p class="small">Scanner B reads higher by 0.5 mL. The true effect is −0.30 mL.</p>',
+      options: [{ t: 'It gets more negative', fb: 'The opposite. Patients are mostly on the scanner that reads higher.' }, { t: 'It moves toward zero, or even past it', ok: true, fb: 'Most patients are on the high-reading scanner, so the scanner adds to their volumes, hiding the disease effect. With these settings the raw estimate is close to zero: a real effect has disappeared.' }, { t: 'It stays at −0.30', fb: 'Check the raw row after you move the slider.' }] }),
+    PBS.task({ tag: 'Predict, then toggle', title: '3. Keep the patient share at 60, then switch off “Protect age and diagnosis”. How does the harmonised estimate behave?',
+      options: [{ t: 'Better: it now removes more scanner variation', fb: 'It removes more, but not only scanner variation.' }, { t: 'Worse: it removes scanner and part of the disease effect', ok: true, fb: 'Without protection the method sees that scanner B has lower volumes among its mostly-patient group, and cannot tell that from a scanner effect. Protecting the covariate tells it which part of the difference belongs to biology.' }, { t: 'No change', fb: 'Switch the toggle and compare the harmonised bar.' }] }),
+    PBS.task({ tag: 'Predict, then slide', title: '4. Slide the patient share to 100 (fully confounded). Which analysis recovers the true effect?',
+      options: [{ t: 'Scanner as a covariate', fb: 'It cannot even run: scanner and diagnosis are the same column in the data.' }, { t: 'Harmonisation with diagnosis protected', fb: 'It needs the same separation and cannot run either.' }, { t: 'Harmonisation without protection', fb: 'It runs, and reports an effect near zero. It looks like a clean answer, but it removed the disease effect with the scanner.' }, { t: 'None of them', ok: true, fb: 'The data cannot separate scanner from diagnosis, and no statistical method can. The estimate that looks fine (harmonisation without protection) is the most misleading.' }] }),
+    PBS.doTask({ tag: 'Try', title: '5. Rescue the confounded design', doit: '<b>Do this:</b> keep the patient share at 100, then tick “Add 20 travelling volunteers”.',
+      reveal: 'The covariate row can now be estimated, and the harmonised estimate (protected) can run. The volunteers appear on both scanners, as the grey lines in the scatter plot. Each line shows that one person’s scanner offset directly. Overlap, even a small amount, gives the data something to separate scanner from diagnosis. Compare the width of the bars: the answer is unbiased but uncertain, because 20 people carry all the information about the scanner.' }),
+    PBS.doTask({ tag: 'Extend', title: '6. A scale effect with no shift', doit: '<b>Do this:</b> set shift to 0 and stretch to 2.0, with a balanced design.',
+      reveal: 'The raw group difference is still unbiased. Look at the two density plots: before harmonisation scanner B’s curve is much wider than A’s, and afterwards the widths match. The error bar hardly changes. Harmonising makes the scanners comparable, which matters when you later compare one person with a reference built from several scanners, but it cannot restore precision lost to a noisier scanner.' }));
+  root.append(tasks);
+  root.append(PBS.takeaway([
+    'A scanner can shift the numbers (location) and stretch their spread (scale). Harmonisation estimates both and removes them.',
+    'Protect the biology you care about, or harmonisation will remove it together with the scanner.',
+    'If diagnosis and scanner are the same variable, nothing can separate them. The fix is overlap: both groups at each site, or the same people on both scanners.']));
+
+  PBS.frame('scanner', root);
+  refresh();
+  window.__lab = { analyse, P, refresh, reseed: (n) => { seed = n; draw(); } };
+})();
+</script>
+</body>
+</html>

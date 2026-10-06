@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Same-average lab – PBS08</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .hm { display: flex; flex-direction: column; gap: 2px; }
+  .hm-row { display: grid; grid-template-columns: 24px repeat(12, minmax(0, 1fr)) 62px; gap: 2px; align-items: center; width: 100%; }
+  button.hm-row { appearance: none; border: 0; background: none; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; border-radius: 3px; }
+  .hm-head span { font-size: 11.5px; font-weight: 700; text-align: center; color: var(--muted); }
+  .hm-id { font-size: 10.5px; color: var(--muted); text-align: right; padding-right: 4px; }
+  .hm-cell { height: 13px; border-radius: 2px; display: block; }
+  .hm-cell.flag { box-shadow: inset 0 0 0 1.6px var(--ink); }
+  .hm-flag { position: relative; height: 13px; line-height: 13px; font-size: 11px; background: var(--pink-soft); border-radius: 2px; overflow: hidden; display: block; }
+  .hm-flag i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--coral); opacity: .55; }
+  .hm-flag b { position: relative; display: block; font-size: 11px; padding-left: 4px; line-height: 13px; }
+  .hm-head .hm-flag { background: none; }
+  .hm-head .hm-flag b { font-size: 11.5px; color: var(--muted); }
+  button.hm-row:hover .hm-cell { filter: brightness(.96); }
+  button.hm-row.sel { outline: 2px solid var(--blue); outline-offset: 1px; }
+  button.hm-row.sel .hm-id { color: var(--ink); font-weight: 800; }
+  .hm-mean { margin-top: 6px; padding-top: 6px; border-top: 1.5px solid var(--rose); }
+  .hm-mean .hm-cell { height: 24px; display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 700; color: var(--ink); }
+  .hm-mean .hm-id { font-size: 10.5px; font-weight: 700; color: var(--ink); }
+  @media (max-width: 560px) { .hm-mean .hm-cell { font-size: 9px; } .hm-mean .hm-id { font-size: 9px !important; } }
+  .legend { display: flex; align-items: center; gap: 3px; font-size: 13px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 24px; height: 12px; border-radius: 2px; }
+  .legend .fl { display: inline-block; width: 24px; height: 12px; border-radius: 2px; box-shadow: inset 0 0 0 1.6px var(--ink); margin-left: 12px; }
+  .readout { font-size: 15.5px; margin-top: 8px; }
+  .readout b { color: var(--coral-ink); }
+  table.t td.lbl { white-space: normal; font-weight: 700; }
+  .seg.chips { border: 0; gap: 6px; border-radius: 0; overflow: visible; }
+  .seg.chips button { border: 1.5px solid var(--rose); border-radius: 8px; }
+  .seg.chips button:last-child { border-right: 1.5px solid var(--rose); }
+  .key { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; font-size: 14px; color: var(--muted); }
+  .key i { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="wrap" id="root">
+  <noscript><p class="callout">These labs need JavaScript. Please enable it and reload.</p></noscript>
+</div>
+<script src="shared.js"></script>
+<script>
+(function () {
+  const { h, s, f } = PBS;
+  const root = document.getElementById('root');
+
+  /* ---------------------------------------------------------------- design of the simulation ----------
+     40 simulated patients and 80 simulated controls, each with a z-score (deviation from the normative
+     expectation) in 12 regions. Controls are healthy, so their z-scores are standard normal by construction.
+     A patient is "hit" with probability `frac`; a hit lowers `k` randomly chosen regions by `sev` z.
+     `diff` lowers every region in every patient by the same small amount. */
+  const REG = [['Hip', 'Hippocampus'], ['Ent', 'Entorhinal cortex'], ['Amy', 'Amygdala'], ['Ins', 'Insula'], ['ACC', 'Anterior cingulate'], ['Pcu', 'Precuneus'],
+    ['PFC', 'Prefrontal cortex'], ['TP', 'Temporal pole'], ['Par', 'Parietal cortex'], ['Occ', 'Occipital cortex'], ['Tha', 'Thalamus'], ['Cb', 'Cerebellum']];
+  const NR = REG.length, NP = 40, NC = 80;
+  const THR = { p5: { z: -1.645, q: 5, name: '5th' }, p25: { z: -1.96, q: 2.5, name: '2.5th' }, p1: { z: -2.326, q: 1, name: '1st' } };
+  const PRE = {
+    A: { name: 'Everyone shifts a little', frac: 0, k: 0, sev: 0, diff: 0.4 },
+    B: { name: 'Everyone hit in 3 regions', frac: 1, k: 3, sev: 1.6, diff: 0 },
+    C: { name: 'One in four hit hard', frac: 0.25, k: 12, sev: 1.6, diff: 0 },
+    N: { name: 'No disease at all', frac: 0, k: 0, sev: 0, diff: 0 },
+  };
+  const S = { seed: 29, preset: 'A', frac: 0, k: 0, sev: 0, diff: 0.4, thr: 'p25', sort: false, sel: null };
+
+  /* ---------------------------------------------------------------- random draws (fixed per seed) */
+  let N, CN, uA, uRank, perm, rank;
+  function draw() {
+    const r = PBS.rng(900 + S.seed);
+    N = Array.from({ length: NP }, () => Array.from({ length: NR }, () => r.n()));
+    CN = Array.from({ length: NC }, () => Array.from({ length: NR }, () => r.n()));
+    uA = Array.from({ length: NP }, () => r.u());
+    uRank = uA.map((u) => uA.filter((w) => w < u).length);
+    perm = Array.from({ length: NP }, () => { const a = Array.from({ length: NR }, (_, i) => i); for (let i = NR - 1; i > 0; i--) { const j = r.int(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; });
+    rank = perm.map((p) => { const rk = new Array(NR); p.forEach((reg, pos) => { rk[reg] = pos; }); return rk; });
+  }
+
+  /* ---------------------------------------------------------------- t distribution (two-sided p) */
+  function lgamma(x) { const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5]; let y = x, t = x + 5.5; t -= (x + 0.5) * Math.log(t); let sum = 1.000000000190015; for (let j = 0; j < 6; j++) { y += 1; sum += c[j] / y; } return -t + Math.log(2.5066282746310005 * sum / x); }
+  function betacf(a, b, x) {
+    const FP = 1e-300; let qab = a + b, qap = a + 1, qam = a - 1, c = 1, d = 1 - qab * x / qap; if (Math.abs(d) < FP) d = FP; d = 1 / d; let hh = d;
+    for (let m = 1; m <= 200; m++) {
+      const m2 = 2 * m; let aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+      d = 1 + aa * d; if (Math.abs(d) < FP) d = FP; c = 1 + aa / c; if (Math.abs(c) < FP) c = FP; d = 1 / d; hh *= d * c;
+      aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+      d = 1 + aa * d; if (Math.abs(d) < FP) d = FP; c = 1 + aa / c; if (Math.abs(c) < FP) c = FP; d = 1 / d;
+      const del = d * c; hh *= del; if (Math.abs(del - 1) < 3e-12) break;
+    }
+    return hh;
+  }
+  function ibeta(x, a, b) { if (x <= 0) return 0; if (x >= 1) return 1; const bt = Math.exp(lgamma(a + b) - lgamma(a) - lgamma(b) + a * Math.log(x) + b * Math.log(1 - x)); return x < (a + 1) / (a + b + 2) ? bt * betacf(a, b, x) / a : 1 - bt * betacf(b, a, 1 - x) / b; }
+  const pTwo = (t, df) => ibeta(df / (df + t * t), df / 2, 0.5);
+
+  /* ---------------------------------------------------------------- analysis */
+  function analyse(par, thrKey) {
+    const thr = THR[thrKey || S.thr].z;
+    const nHit = Math.round(par.frac * NP);
+    const Z = N.map((row, i) => { const aff = uRank[i] < nHit; return row.map((v, j) => v - par.diff - (aff && rank[i][j] < par.k ? par.sev : 0)); });
+    const regs = [];
+    for (let j = 0; j < NR; j++) {
+      const a = Z.map((r) => r[j]), c = CN.map((r) => r[j]);
+      const ma = PBS.mean(a), mc = PBS.mean(c), va = PBS.sd(a) ** 2, vc = PBS.sd(c) ** 2;
+      const sp = Math.sqrt(((NP - 1) * va + (NC - 1) * vc) / (NP + NC - 2));
+      const d = (ma - mc) / sp, t = d / Math.sqrt(1 / NP + 1 / NC), p = pTwo(t, NP + NC - 2);
+      regs.push({ mean: ma, d, p });
+    }
+    const count = Z.map((r) => r.filter((z) => z < thr).length);
+    const sig = regs.filter((r) => r.p < 0.05 && r.d < 0).length;
+    const meanZ = PBS.mean(regs.map((r) => r.mean));
+    return { Z, regs, count, sig, meanZ, thr, any: count.filter((c) => c >= 1).length / NP, three: count.filter((c) => c >= 3).length / NP, max: Math.max(...count) };
+  }
+  const healthyProb = (q) => { const p = q / 100, out = []; let c = 1; for (let k = 0; k <= NR; k++) { if (k > 0) c = c * (NR - k + 1) / k; out.push(c * Math.pow(p, k) * Math.pow(1 - p, NR - k)); } return out; };
+
+  /* ---------------------------------------------------------------- colours (theme-aware) */
+  let PAL = null;
+  function hex(v) { const m = /^#?([0-9a-f]{6})$/i.exec(v.trim()); const n = parseInt(m ? m[1] : '888888', 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+  function pal() { const cs = getComputedStyle(document.documentElement); PAL = { bg: hex(cs.getPropertyValue('--card')), neg: hex(cs.getPropertyValue('--blue')), pos: hex(cs.getPropertyValue('--coral')) }; }
+  function zcol(z) { const t = Math.min(1, Math.abs(z) / 3), tg = z < 0 ? PAL.neg : PAL.pos; return 'rgb(' + PAL.bg.map((b, i) => Math.round(b + (tg[i] - b) * Math.pow(t, 0.85))).join(',') + ')'; }
+
+  /* ---------------------------------------------------------------- page */
+  root.append(
+    h('h1', {}, 'Same-average lab'),
+    h('p', { class: 'sub' }, 'Three very different patient groups can give the same average result. Build them, look at every patient, and see what a group comparison can and cannot tell you.'),
+    h('div', { class: 'callout' }, 'Every cell is a z-score: how far one person’s measurement in one region sits from what is expected for their age and sex. Blue means smaller than expected. A black outline marks a region flagged as unusual. Click a patient to see their profile.'));
+
+  const heat = h('div', { class: 'hm', id: 'heat' });
+  const readout = h('div', { class: 'readout', id: 'readout', 'aria-live': 'polite' });
+  const legend = h('div', { class: 'legend', id: 'legend' });
+  const profHost = h('div', { id: 'profile' });
+
+  const preSeg = PBS.seg({ label: 'Patient group', value: S.preset, options: [{ v: 'A', label: 'Everyone shifts a little' }, { v: 'B', label: 'Everyone hit in 3 regions' }, { v: 'C', label: 'One in four hit hard' }, { v: 'N', label: 'No disease' }, { v: 'custom', label: 'My own' }],
+    onChange: (v) => { S.preset = v; S.sel = null; if (v !== 'custom') { const p = PRE[v]; Object.assign(S, { frac: p.frac, k: p.k, sev: p.sev, diff: p.diff }); syncSliders(); } update(); } });
+  const mk = (id, label, min, max, step, key, fmt, hint) => PBS.slider({ id, label, min, max, step, value: S[key], fmt, hint, onInput: (v) => { S[key] = key === 'frac' ? v / 100 : v; S.preset = 'custom'; preSeg.set('custom'); update(); } });
+  const slFrac = mk('frac', 'Share of patients who are hit', 0, 100, 5, 'frac', (v) => v + '%');
+  const slK = mk('k', 'Regions affected in each hit patient', 0, 12, 1, 'k', (v) => String(v));
+  const slSev = mk('sev', 'Size of each hit (z-score units)', 0, 3, 0.1, 'sev', (v) => f(v, 1));
+  const slDiff = mk('diff', 'Small shift in every region, every patient', 0, 1, 0.05, 'diff', (v) => f(v, 2));
+  function syncSliders() { slFrac.set(Math.round(S.frac * 100)); slK.set(S.k); slSev.set(S.sev); slDiff.set(S.diff); }
+  const thrSeg = PBS.seg({ label: 'Flag threshold', value: S.thr, options: [{ v: 'p5', label: '5th centile' }, { v: 'p25', label: '2.5th' }, { v: 'p1', label: '1st' }], onChange: (v) => { S.thr = v; update(); } });
+  const sortT = PBS.toggle({ id: 'sort', label: 'Sort patients by number of flagged regions', value: S.sort, onChange: (v) => { S.sort = v; update(); } });
+  const reseed = h('button', { class: 'btn alt sm', type: 'button', id: 'reseed' }, 'Draw new people');
+  reseed.addEventListener('click', () => { S.seed++; S.sel = null; draw(); update(); });
+  const expected = h('div', { class: 'small', id: 'expected', style: { marginTop: '4px' } });
+
+  preSeg.classList.add('chips');
+  const ctlCard = PBS.card('Build the patient group', [preSeg, h('div', { style: { height: '12px' } }), slFrac, slK, slSev, slDiff, expected,
+    h('div', { class: 'ctl', style: { marginTop: '10px' } }, h('div', { class: 'lbl' }, h('span', {}, 'Flag a region when it is below the')), thrSeg),
+    h('div', { class: 'ctl' }, sortT), h('div', { class: 'row' }, reseed)]);
+  const profCard = PBS.card('One patient', [profHost]);
+
+  root.append(h('div', { class: 'lab wide-controls' },
+    PBS.card('Patients × regions (simulated z-scores)', [heat, legend, readout]),
+    h('div', { class: 'stack' }, ctlCard, profCard)));
+
+  /* group result and individual result */
+  const dHost = h('div', {}), histHost = h('div', {});
+  root.append(h('div', { class: 'cols2', style: { marginBottom: '26px' } },
+    PBS.card('What a group comparison sees', [h('p', { class: 'small' }, 'For each region: the average difference between 40 patients and 80 controls, in standard-deviation units (d). Orange bars pass p < 0.05 without correction for 12 tests.'), dHost,
+      h('div', { class: 'small', id: 'dsum' })]),
+    PBS.card('What individual maps see', [h('p', { class: 'small' }, 'How many regions are flagged in each person. Healthy people are not flag-free: with 12 regions, some are flagged by chance.'), histHost,
+      h('div', { class: 'small', id: 'hsum' })])));
+
+  const chD = PBS.chart(dHost, { w: 560, h: 300, m: { l: 62, r: 14, t: 14, b: 54 }, xd: [0, NR], yd: [-1, 0.3], xt: [], yt: [-1, -0.75, -0.5, -0.25, 0], yfmt: (v) => f(v, 2), ylabel: 'Group difference, d', label: 'Group difference by region' });
+  const chH = PBS.chart(histHost, { w: 560, h: 300, m: { l: 62, r: 14, t: 26, b: 58 }, xd: [0, 6], yd: [0, 100], xt: [], yt: [0, 25, 50, 75, 100], yfmt: (v) => v + '%', ylabel: 'Share of people', xlabel: 'Regions flagged in one person', label: 'Number of flagged regions per person' });
+  const small = window.innerWidth < 700;
+  REG.forEach((r, i) => chD.back.append(s('text', { class: 'tick', x: chD.x(i + 0.5), y: chD.m.t + chD.ih + 17, 'text-anchor': 'middle', text: r[0], style: small ? 'font-size:10.5px' : '' })));
+  ['0', '1', '2', '3', '4', '5+'].forEach((t, i) => chH.back.append(s('text', { class: 'tick', x: chH.x(i + 0.5), y: chH.m.t + chH.ih + 19, 'text-anchor': 'middle', text: t })));
+  chD.back.append(s('text', { class: 'axl', x: chD.m.l + chD.iw / 2, y: chD.H - 6, 'text-anchor': 'middle', text: 'Region' }));
+  // zero line
+  chD.back.append(s('line', { class: 'axis', x1: chD.m.l, x2: chD.m.l + chD.iw, y1: chD.y(0), y2: chD.y(0) }));
+
+  /* side-by-side comparison */
+  const cmpHost = h('div', { class: 'scroll-x', id: 'cmp' });
+  root.append(h('details', { class: 'more', id: 'cmpdet', style: { marginBottom: '26px' } }, h('summary', {}, 'Side-by-side table: the three groups, same simulated people (open after you have predicted)'),
+    h('p', { class: 'small', style: { marginTop: '8px' } }, 'The three groups below use exactly the same draw of random noise, the same flag threshold and the same 80 controls, so any difference comes from how the patients are affected.'), cmpHost));
+
+  /* ---------------------------------------------------------------- drawing */
+  let A = null;
+  function renderHeat() {
+    pal(); PBS.clear(heat);
+    heat.append(h('div', { class: 'hm-row hm-head' }, h('span', {}, ''), ...REG.map((r) => h('span', { title: r[1] }, r[0])), h('span', { class: 'hm-flag' }, h('b', {}, 'Flagged'))));
+    let order = Array.from({ length: NP }, (_, i) => i);
+    if (S.sort) order.sort((a, b) => A.count[b] - A.count[a] || a - b);
+    order.forEach((i) => {
+      const row = h('button', { type: 'button', class: 'hm-row' + (S.sel === i ? ' sel' : ''), 'aria-label': 'Patient ' + (i + 1) + ', ' + A.count[i] + ' regions flagged', 'data-pt': String(i) },
+        h('span', { class: 'hm-id' }, String(i + 1)),
+        ...A.Z[i].map((z) => h('span', { class: 'hm-cell' + (z < A.thr ? ' flag' : ''), style: { background: zcol(z) } })),
+        h('span', { class: 'hm-flag' }, h('i', { style: { width: Math.min(100, A.count[i] / 6 * 100) + '%' } }), h('b', {}, String(A.count[i]))));
+      row.addEventListener('click', () => { S.sel = i; renderHeat(); renderProfile(); });
+      heat.append(row);
+    });
+    heat.append(h('div', { class: 'hm-row hm-mean' }, h('span', { class: 'hm-id' }, ''),
+      ...A.regs.map((r) => h('span', { class: 'hm-cell', style: { background: zcol(r.mean) } }, f(r.mean, 1))), h('span', { class: 'hm-id', style: { textAlign: 'left', fontSize: '11px' } }, 'Group mean')));
+    PBS.clear(legend);
+    legend.append('z-score:', ...[-3, -2, -1, 0, 1, 2, 3].flatMap((z) => [h('i', { style: { background: zcol(z) } }), h('span', { style: { minWidth: '24px', marginLeft: '-27px', textAlign: 'center', fontSize: '11.5px', color: Math.abs(z) > 1.5 ? 'var(--btn-ink)' : 'var(--ink)', fontWeight: '700', position: 'relative' } }, z > 0 ? '+' + z : f(z, 0))]), h('span', { class: 'fl' }), 'flagged');
+  }
+  function renderProfile() {
+    PBS.clear(profHost);
+    if (S.sel === null) { profHost.append(h('p', { class: 'small', style: { margin: 0 } }, 'Click any row of the table to see that patient’s 12 z-scores.')); return; }
+    const z = A.Z[S.sel], W = 340, rowH = 18, top = 24, H = top + NR * rowH + 30, x0 = 44, x1 = W - 10, zl = -4.2, zr = 2.4;
+    const X = (v) => x0 + (v - zl) / (zr - zl) * (x1 - x0);
+    const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': 'Profile of patient ' + (S.sel + 1) });
+    svg.append(s('text', { class: 'note', x: 2, y: 14, style: 'font-weight:700', text: 'Patient ' + (S.sel + 1) + ': ' + A.count[S.sel] + (A.count[S.sel] === 1 ? ' region' : ' regions') + ' flagged' }));
+    [-4, -3, -2, -1, 0, 1, 2].forEach((t) => { svg.append(s('line', { class: 'grid', x1: X(t), x2: X(t), y1: top, y2: top + NR * rowH })); svg.append(s('text', { class: 'tick', x: X(t), y: top + NR * rowH + 15, 'text-anchor': 'middle', text: t < 0 ? '−' + (-t) : String(t) })); });
+    svg.append(s('text', { class: 'axl', x: (x0 + x1) / 2, y: H - 2, 'text-anchor': 'middle', text: 'z-score', style: 'font-size:12.5px' }));
+    svg.append(s('line', { x1: X(A.thr), x2: X(A.thr), y1: top, y2: top + NR * rowH, stroke: 'var(--coral)', 'stroke-width': 1.6, 'stroke-dasharray': '4 3' }));
+    svg.append(s('line', { class: 'axis', x1: X(0), x2: X(0), y1: top, y2: top + NR * rowH }));
+    z.forEach((v, j) => {
+      const y = top + j * rowH, flagged = v < A.thr;
+      svg.append(s('text', { class: 'tick', x: x0 - 6, y: y + rowH / 2 + 4, 'text-anchor': 'end', text: REG[j][0], style: 'font-size:12px' }));
+      svg.append(s('rect', { x: Math.min(X(0), X(v)), y: y + 3, width: Math.abs(X(v) - X(0)), height: rowH - 6, fill: flagged ? 'var(--coral)' : 'var(--rose)', 'fill-opacity': flagged ? 1 : 0.55, rx: 2 }));
+    });
+    profHost.append(svg, h('p', { class: 'small', style: { margin: '2px 0 0' } }, 'Dashed line: the flag threshold (z = ' + f(A.thr, 2) + '). Bars further left are smaller than expected.'));
+  }
+  function renderD() {
+    const L = chD.layer(); const g = s('g', { 'clip-path': chD.clip }); L.append(g);
+    A.regs.forEach((r, i) => {
+      const sig = r.p < 0.05 && r.d < 0;
+      g.append(s('rect', { x: chD.x(i + 0.15), y: Math.min(chD.y(0), chD.y(r.d)), width: chD.x(i + 0.85) - chD.x(i + 0.15), height: Math.abs(chD.y(r.d) - chD.y(0)), fill: sig ? 'var(--orange)' : 'var(--rose)', 'fill-opacity': sig ? 1 : 0.5, rx: 2 }));
+    });
+    document.getElementById('dsum').textContent = A.sig + ' of 12 regions pass p < 0.05. Average d across regions: ' + f(PBS.mean(A.regs.map((r) => r.d)), 2) + '.';
+  }
+  function renderH() {
+    const L = chH.layer(), cnt = [0, 0, 0, 0, 0, 0]; A.count.forEach((c) => { cnt[Math.min(5, c)]++; });
+    const hp = healthyProb(THR[S.thr].q), hv = [0, 0, 0, 0, 0, 0]; hp.forEach((p, k) => { hv[Math.min(5, k)] += p; });
+    cnt.forEach((c, i) => {
+      const pv = c / NP * 100, hh = hv[i] * 100;
+      L.append(s('rect', { x: chH.x(i + 0.08), y: chH.y(pv), width: chH.x(i + 0.5) - chH.x(i + 0.08), height: Math.max(0, chH.y(0) - chH.y(pv)), fill: 'var(--coral)', rx: 2 }));
+      L.append(s('rect', { x: chH.x(i + 0.5), y: chH.y(hh), width: chH.x(i + 0.92) - chH.x(i + 0.5), height: Math.max(0, chH.y(0) - chH.y(hh)), fill: 'none', stroke: 'var(--ink)', 'stroke-width': 1.6, 'stroke-dasharray': '4 2', rx: 2 }));
+      if (pv >= 1) L.append(s('text', { class: 'tick', x: chH.x(i + 0.29), y: chH.y(pv) - 5, 'text-anchor': 'middle', text: Math.round(pv) + '%', style: 'font-size:12px' }));
+      if (hh >= 1) L.append(s('text', { class: 'tick', x: chH.x(i + 0.71), y: chH.y(hh) - 5, 'text-anchor': 'middle', text: Math.round(hh) + '%', style: 'font-size:12px' }));
+    });
+    const lx = chH.m.l + 6, ly = 12;
+    L.append(s('rect', { x: lx, y: ly - 9, width: 12, height: 12, fill: 'var(--coral)', rx: 2 }), s('text', { class: 'tick', x: lx + 17, y: ly + 2, text: 'These patients', style: 'font-size:12.5px' }),
+      s('rect', { x: lx + 118, y: ly - 9, width: 12, height: 12, fill: 'none', stroke: 'var(--ink)', 'stroke-width': 1.6, 'stroke-dasharray': '3 2', rx: 2 }), s('text', { class: 'tick', x: lx + 135, y: ly + 2, text: 'Healthy people (expected)', style: 'font-size:12.5px' }));
+    const hAny = (1 - hp[0]) * 100;
+    document.getElementById('hsum').innerHTML = '<b>' + Math.round(A.any * 100) + '%</b> of these patients have at least one flagged region; about <b>' + Math.round(hAny) + '%</b> of healthy people do too.';
+  }
+  function renderReadout() {
+    const exp = S.diff + S.frac * S.k / NR * S.sev;
+    document.getElementById('expected').innerHTML = 'Expected average shift in each region: <b>' + f(-exp, 2) + '</b> z';
+    readout.innerHTML = 'Group mean shift across regions: <b>' + f(A.meanZ, 2) + '</b> z. Patients with at least one flagged region: <b>' + Math.round(A.any * 100) + '%</b>. With three or more: <b>' + Math.round(A.three * 100) + '%</b>. Most flagged in one person: <b>' + A.max + '</b>.';
+  }
+  function renderCmp() {
+    PBS.clear(cmpHost);
+    const keys = ['A', 'B', 'C', 'N'];
+    const rows = keys.map((k) => { const p = PRE[k], a = analyse(p); return h('tr', {}, h('td', { class: 'lbl' }, p.name), h('td', { class: 'n' }, f(a.meanZ, 2)), h('td', { class: 'n' }, a.sig + ' / 12'), h('td', { class: 'n' }, Math.round(a.any * 100) + '%'), h('td', { class: 'n' }, Math.round(a.three * 100) + '%'), h('td', { class: 'n' }, String(a.max))); });
+    const hp = healthyProb(THR[S.thr].q), h3 = hp.slice(3).reduce((x, y) => x + y, 0);
+    rows.push(h('tr', {}, h('td', { class: 'lbl' }, 'Healthy people (expected)'), h('td', { class: 'n' }, '0.00'), h('td', { class: 'n' }, '–'), h('td', { class: 'n' }, Math.round((1 - hp[0]) * 100) + '%'), h('td', { class: 'n' }, f(h3 * 100, 1) + '%'), h('td', { class: 'n' }, '–')));
+    cmpHost.append(h('table', { class: 't' }, h('thead', {}, h('tr', {}, h('th', {}, 'Group'), h('th', { class: 'n' }, 'Mean z'), h('th', { class: 'n' }, 'Regions p<.05'), h('th', { class: 'n' }, '≥1 flagged'), h('th', { class: 'n' }, '≥3 flagged'), h('th', { class: 'n' }, 'Max in one'))), h('tbody', {}, rows)));
+  }
+  function update() {
+    A = analyse(S);
+    if (S.sel === null) { let best = 0; A.count.forEach((c, i) => { if (c > A.count[best]) best = i; }); S.sel = best; }
+    renderHeat(); renderProfile(); renderD(); renderH(); renderReadout(); renderCmp();
+  }
+
+  /* ---------------------------------------------------------------- tasks */
+  const tasks = h('div', { class: 'tasks' },
+    h('h2', {}, 'Guided tasks'),
+    h('p', { class: 'small' }, 'The first three groups are built to have the same average shift (about −0.4 z in every region). Keep the threshold at the 2.5th centile for these tasks.'),
+    PBS.task({ tag: 'Predict', title: '1. “Everyone shifts a little” and “One in four hit hard” have the same group average. Which has more patients with three or more flagged regions?',
+      body: '<p class="small">Look at the group-mean row for both groups first. Then switch between them and read the sentence under the table.</p>',
+      options: [{ t: 'About the same', fb: 'The averages match, but the people do not. Compare the two readouts under the table.' },
+        { t: '“Everyone shifts a little”', fb: 'A shift of 0.4 z moves each person only slightly. It raises the chance that any one region is flagged from 2.5% to about 6%, so three flags in one person is rare.' },
+        { t: '“One in four hit hard”', ok: true, fb: 'About one patient in four is hit in every region, so those patients typically have many flags. Everyone else looks like a healthy person. The mean z is the same, but the patients are completely different.' }] }),
+    PBS.doTask({ tag: 'Try', title: '2. Find the hit patients', doit: '<b>Do this:</b> choose “One in four hit hard”, tick “Sort patients by number of flagged regions”, then click a patient near the top and one near the bottom.',
+      reveal: 'About one in four patients has a clearly abnormal profile, with most of the 12 regions flagged. The rest look like healthy people. A group average cannot show this, because it blends the two kinds of patient into one number.' }),
+    PBS.task({ tag: 'Predict', title: '3. Choose “No disease at all”. In a group with no effect whatsoever, roughly what share of patients has at least one flagged region?',
+      options: [{ t: 'About 2.5%', fb: 'That is the chance of one region being flagged. There are 12 regions, so the chance that at least one is flagged is much higher.' }, { t: 'About a quarter', ok: true, fb: 'One minus 0.975 to the power 12 is about 26%. Flagging a region does not mean a person is ill: with many regions, many healthy people have at least one unusual value.' }, { t: 'About half', fb: 'That would be the case if the chance for each region were about 6%. Try the 5th centile threshold to see roughly how that looks.' }] }),
+    PBS.task({ tag: 'Predict', title: '4. Can the group comparison (the orange bars) tell the three groups apart?',
+      body: '<p class="small">Switch between “Everyone shifts a little”, “Everyone hit in 3 regions” and “One in four hit hard”, then look at the bars.</p>',
+      options: [{ t: 'Yes: the focal groups look very different from the diffuse one', fb: 'The bars look alike, because every region ends up with about the same average difference in all three groups.' }, { t: 'No: all three give a similar pattern of small differences across regions', ok: true, fb: 'The average difference per region is about the same in the three groups, by design. The individual maps differ strongly. This is why normative modelling reports each person’s deviations, and not only group differences.' }, { t: 'Only the “one in four” group is detectable', fb: 'The group difference in each region is about the same for all three groups. Details such as which bars pass p < 0.05 depend on the random draw.' }] }),
+    PBS.doTask({ tag: 'Try', title: '5. Build your own matching group', doit: '<b>Do this:</b> choose “My own”. Set the share of patients hit to 50%, regions per hit patient to 6, and find the size of hit that keeps the expected average shift near 0.4 (shown above the threshold buttons).',
+      reveal: 'The expected average shift is the diffuse shift plus (share hit × regions hit ÷ 12 × size of hit). With 50% hit in 6 regions, a hit of 1.6 gives 0.5 × 0.5 × 1.6 = 0.4. Many different patient groups share one average.' }),
+    PBS.doTask({ tag: 'Try', title: '6. Open the side-by-side table', doit: '<b>Do this:</b> open the table above the guided tasks, and compare the columns “Mean z” and “Regions p&lt;.05” with “≥3 flagged”.',
+      reveal: 'The group-level columns are close to each other. The individual-level columns are very different. The healthy row shows what to expect from chance alone, which is why a flag is a reason to look more closely, not a diagnosis.' }));
+  root.append(tasks);
+  root.append(PBS.takeaway([
+    'A group mean can come from many different patterns: a small shift in everyone, a large shift in a few, or something in between.',
+    'A case–control test asks whether groups differ on average. It cannot say which patients differ, or in which regions.',
+    'Individual deviation maps show each person’s own pattern, but with many regions some healthy people are flagged by chance. Look at the number and pattern of flags, not one cell.']));
+  root.append(h('p', { class: 'src' }, 'Simulated data. Idea after Marquand et al. (2016), Biological Psychiatry, “Understanding heterogeneity in clinical cohorts using normative models: beyond case-control studies”.'));
+
+  PBS.frame('sameaverage', root);
+  draw(); syncSliders(); update();
+  const redraw = () => { if (A) { renderHeat(); } };
+  try { new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] }); window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redraw); } catch (e) { /* no theme listener */ }
+  window.__lab = { S, update, analyse, PRE, draw, getA: () => A };
+})();
+</script>
+</body>
+</html>

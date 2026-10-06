@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sampling lab – PBS08</title>
+<link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<div class="wrap" id="root">
+  <noscript><p class="callout">These labs need JavaScript. Please enable it and reload.</p></noscript>
+</div>
+<script src="shared.js"></script>
+<script>
+(function () {
+  const { h, s, f, pct } = PBS;
+  const root = document.getElementById('root');
+  const NS = [25, 100, 1000, 5000];
+  const rng = PBS.rng(20261020);
+  const store = { 25: [], 100: [], 1000: [], 5000: [] };
+  let trueR = 0.10;
+  let studiesRun = 0;
+  const CAP = 700;
+
+  /* ---------- simulation ---------- */
+  function simulateStudy(n, rho) {
+    const x = new Float64Array(n), y = new Float64Array(n), c = Math.sqrt(1 - rho * rho);
+    let mx = 0, my = 0;
+    for (let i = 0; i < n; i++) { x[i] = rng.n(); y[i] = rho * x[i] + c * rng.n(); mx += x[i]; my += y[i]; }
+    mx /= n; my /= n;
+    let sxy = 0, sxx = 0, syy = 0;
+    for (let i = 0; i < n; i++) { const dx = x[i] - mx, dy = y[i] - my; sxy += dx * dy; sxx += dx * dx; syy += dy * dy; }
+    const r = sxy / Math.sqrt(sxx * syy);
+    return { r, x, y, p: pvalue(r, n) };
+  }
+  function pvalue(r, n) { const z = Math.atanh(Math.max(-0.999999, Math.min(0.999999, r))) * Math.sqrt(n - 3); return 2 * (1 - PBS.normCdf(Math.abs(z))); }
+  function corrStats(n, r) { return { r, sig: pvalue(r, n) < 0.05, jit: rng.u() }; }
+  function power(n, rho) {
+    const d = Math.atanh(rho) * Math.sqrt(n - 3);
+    return 1 - PBS.normCdf(1.96 - d) + PBS.normCdf(-1.96 - d);
+  }
+  function runBatch(k) {
+    for (const n of NS) {
+      for (let j = 0; j < k; j++) {
+        const st = simulateStudy(n, trueR);
+        const arr = store[n]; arr.push(corrStats(n, st.r)); if (arr.length > CAP) arr.shift();
+      }
+    }
+    studiesRun += k;
+  }
+
+  /* ---------- page head ---------- */
+  root.append(
+    h('h1', {}, 'Sampling lab'),
+    h('p', { class: 'sub' }, 'Small effects need large samples. Here you can see why, by running studies on a population where you know the true answer.'),
+    h('div', { class: 'callout' }, 'Each dot is one simulated study of one brain measure and one behaviour score. The true correlation is the same in every study. Only the number of people changes.')
+  );
+
+  /* ---------- card 1: many studies ---------- */
+  const stripHost = h('div', {});
+  const rSlider = PBS.slider({ id: 'trueR', label: 'True correlation in the population', min: 0, max: 0.5, step: 0.01, value: 0.10, fmt: (v) => 'r = ' + f(v, 2), onInput: (v) => { trueR = v; clearAll(); drawStrip(); updateTable(); updatePower(); }, hint: 'Changing this clears the studies so far.' });
+  const runBtn = h('button', { class: 'btn', type: 'button', id: 'run100' }, 'Run 100 studies');
+  const run1000 = h('button', { class: 'btn alt', type: 'button', id: 'run500' }, 'Run 500 more');
+  const clrBtn = h('button', { class: 'btn alt sm', type: 'button', id: 'clear' }, 'Clear');
+  const counter = h('div', { class: 'small', id: 'counter' }, 'No studies run yet.');
+  const tblHost = h('div', { class: 'scroll-x' });
+
+  const lab1 = h('div', { class: 'lab wide-controls' },
+    PBS.card('Many simulated studies', [stripHost, h('p', { class: 'src' }, 'Coral dots reached p < .05. Grey dots did not. p-values use the Fisher z approximation.')]),
+    h('div', { class: 'stack' },
+      PBS.card('Controls', [rSlider, h('div', { class: 'row' }, runBtn, run1000, clrBtn), counter]),
+      PBS.card('What each sample size gives you', tblHost)));
+  root.append(lab1);
+
+  const ch = PBS.chart(stripHost, { w: 760, h: 380, m: { l: 78, r: 16, t: 16, b: 52 }, xd: [-0.6, 0.8], yd: [0, 4], xt: PBS.ticks(-0.6, 0.8, 0.2), xfmt: (v) => f(v, 1), yt: [], xlabel: 'Observed correlation in one simulated study', label: 'Strip chart of observed correlations by sample size' });
+  NS.forEach((n, i) => {
+    const yy = ch.y(3 - i + 0.5);
+    ch.back.append(s('line', { class: 'grid', x1: ch.m.l, x2: ch.m.l + ch.iw, y1: ch.y(i), y2: ch.y(i) }));
+    ch.back.append(s('text', { class: 'axl', x: ch.m.l - 10, y: yy + 5, 'text-anchor': 'end', text: 'N = ' + n.toLocaleString('en-GB') }));
+  });
+  ch.back.append(s('line', { class: 'grid', x1: ch.m.l, x2: ch.m.l + ch.iw, y1: ch.y(4), y2: ch.y(4) }));
+  function drawStrip() {
+    const L = ch.layer();
+    L.append(s('line', { x1: ch.x(0), x2: ch.x(0), y1: ch.m.t, y2: ch.m.t + ch.ih, stroke: 'var(--muted)', 'stroke-width': 1.3, 'stroke-dasharray': '4 4' }));
+    L.append(s('text', { class: 'tick', x: ch.x(0) - 4, y: ch.m.t + 12, 'text-anchor': 'end', text: 'no effect' }));
+    if (trueR > 0) {
+      L.append(s('line', { x1: ch.x(trueR), x2: ch.x(trueR), y1: ch.m.t, y2: ch.m.t + ch.ih, stroke: 'var(--coral)', 'stroke-width': 2 }));
+      L.append(s('text', { class: 'note', x: ch.x(trueR) + 5, y: ch.m.t + 12, fill: 'var(--coral-ink)', style: 'font-weight:700', text: 'true r = ' + f(trueR, 2) }));
+    }
+    NS.forEach((n, i) => {
+      const row = i; // 0 at top
+      const yBase = 3 - row; // chart row index from the bottom
+      const arr = store[n];
+      for (const d of arr) {
+        if (d.sig) continue;
+        L.append(s('circle', { cx: ch.x(d.r), cy: ch.y(yBase + 0.18 + 0.64 * d.jit), r: 3.3, fill: 'var(--muted)', 'fill-opacity': 0.4 }));
+      }
+      for (const d of arr) {
+        if (!d.sig) continue;
+        L.append(s('circle', { cx: ch.x(d.r), cy: ch.y(yBase + 0.18 + 0.64 * d.jit), r: 3.8, fill: 'var(--coral)', stroke: 'var(--card)', 'stroke-width': 0.6 }));
+      }
+    });
+    if (!studiesRun) L.append(s('text', { class: 'note', x: ch.m.l + ch.iw / 2, y: ch.m.t + ch.ih / 2, 'text-anchor': 'middle', text: 'Press “Run 100 studies”' }));
+  }
+
+  function updateTable() {
+    PBS.clear(tblHost);
+    const head = h('tr', {}, h('th', {}, 'N'), h('th', { class: 'n' }, 'Range of r (95% of studies)'), h('th', { class: 'n' }, 'p < .05'), h('th', { class: 'n' }, 'Mean |r| of those'));
+    const rows = NS.map((n) => {
+      const a = store[n];
+      if (!a.length) return h('tr', {}, h('td', {}, n.toLocaleString('en-GB')), h('td', { class: 'n' }, '–'), h('td', { class: 'n' }, '–'), h('td', { class: 'n' }, '–'));
+      const sorted = a.map((d) => d.r).sort((p, q) => p - q);
+      const lo = PBS.quantile(sorted, 0.025), hi = PBS.quantile(sorted, 0.975);
+      const sig = a.filter((d) => d.sig);
+      const ms = sig.length ? PBS.mean(sig.map((d) => Math.abs(d.r))) : NaN;
+      return h('tr', {}, h('td', {}, n.toLocaleString('en-GB')), h('td', { class: 'n' }, f(lo, 2) + ' to ' + f(hi, 2)), h('td', { class: 'n' }, pct(sig.length / a.length, 0)), h('td', { class: 'n' }, sig.length ? f(ms, 2) : '–'));
+    });
+    tblHost.append(h('table', { class: 't' }, h('thead', {}, head), h('tbody', {}, rows)));
+    const a25 = store[25].filter((d) => d.sig);
+    if (trueR > 0 && a25.length >= 3) tblHost.append(h('p', { class: 'small', style: { marginTop: '8px', whiteSpace: 'normal' } }, 'At N = 25 the significant studies overstate the true effect about ' + f(PBS.mean(a25.map((d) => Math.abs(d.r))) / trueR, 1) + ' times.'));
+    counter.textContent = studiesRun ? studiesRun + ' studies run at each sample size.' : 'No studies run yet.';
+  }
+  function clearAll() { for (const n of NS) store[n].length = 0; studiesRun = 0; }
+  runBtn.addEventListener('click', () => { runBatch(100); drawStrip(); updateTable(); });
+  run1000.addEventListener('click', () => { runBatch(500); drawStrip(); updateTable(); });
+  clrBtn.addEventListener('click', () => { clearAll(); drawStrip(); updateTable(); });
+
+  /* ---------- card 2: one study ---------- */
+  const scHost = h('div', {});
+  let oneN = 25;
+  const hist = [];
+  const histHost = h('div', { class: 'row', style: { gap: '6px' } });
+  const readout = h('div', { class: 'stats', id: 'readout' });
+  const nSeg = PBS.seg({ label: 'Sample size', value: 25, options: [10, 25, 50, 100, 500, 1000].map((v) => ({ v, label: String(v) })), onChange: (v) => { oneN = v; hist.length = 0; draw1(); } });
+  const draw1Btn = h('button', { class: 'btn', type: 'button', id: 'draw1' }, 'Draw one study');
+  const sc = PBS.chart(scHost, { w: 560, h: 340, m: { l: 52, r: 14, t: 12, b: 46 }, xd: [-3.4, 3.4], yd: [-3.4, 3.4], xt: [-3, -2, -1, 0, 1, 2, 3], yt: [-3, -2, -1, 0, 1, 2, 3], xlabel: 'Brain measure (z-score)', ylabel: 'Behaviour score (z)', label: 'Scatter plot of one simulated study' });
+  function draw1() {
+    const st = simulateStudy(oneN, trueR);
+    hist.push({ r: st.r, sig: st.p < 0.05 }); if (hist.length > 14) hist.shift();
+    const L = sc.layer();
+    const k = Math.min(oneN, 400);
+    for (let i = 0; i < k; i++) L.append(s('circle', { cx: sc.x(Math.max(-3.3, Math.min(3.3, st.x[i]))), cy: sc.y(Math.max(-3.3, Math.min(3.3, st.y[i]))), r: oneN > 200 ? 2.6 : 4.2, fill: 'var(--blue)', 'fill-opacity': oneN > 200 ? 0.45 : 0.8 }));
+    let mx = 0, my = 0; for (let i = 0; i < oneN; i++) { mx += st.x[i]; my += st.y[i]; } mx /= oneN; my /= oneN;
+    let sxx = 0, sxy = 0; for (let i = 0; i < oneN; i++) { sxx += (st.x[i] - mx) ** 2; sxy += (st.x[i] - mx) * (st.y[i] - my); }
+    const b = sxy / sxx, a0 = my - b * mx;
+    L.append(s('line', { x1: sc.x(-3.3), x2: sc.x(3.3), y1: sc.y(a0 + b * -3.3), y2: sc.y(a0 + b * 3.3), stroke: 'var(--coral)', 'stroke-width': 3, 'stroke-linecap': 'round' }));
+    PBS.clear(readout);
+    readout.append(
+      h('div', { class: 'stat' }, h('div', { class: 'k' }, 'Observed r'), h('div', { class: 'v coral' }, f(st.r, 2))),
+      h('div', { class: 'stat' }, h('div', { class: 'k' }, 'p-value'), h('div', { class: 'v' }, st.p < 0.001 ? '< .001' : f(st.p, 3))),
+      h('div', { class: 'stat' }, h('div', { class: 'k' }, 'Result'), h('div', { class: 'v' }, st.p < 0.05 ? 'significant' : 'not significant')));
+    PBS.clear(histHost);
+    histHost.append(h('span', { class: 'small' }, 'Last draws:'), ...hist.map((d) => h('span', { class: 'pill', style: d.sig ? { background: 'var(--coral)', color: 'var(--btn-ink)' } : {} }, f(d.r, 2))));
+  }
+  draw1Btn.addEventListener('click', draw1);
+  root.append(h('div', { class: 'lab' },
+    PBS.card('One study at a time', [scHost, h('p', { class: 'src' }, 'The line is the fitted regression. Its slope equals r, because both axes are z-scores.')]),
+    h('div', { class: 'stack' },
+      PBS.card('Draw a study', [h('div', { class: 'ctl' }, h('div', { class: 'lbl' }, h('span', {}, 'Number of people')), nSeg), h('div', { class: 'row', style: { marginBottom: '12px' } }, draw1Btn), readout, h('div', { style: { marginTop: '10px' } }, histHost)]))));
+
+  /* ---------- card 3: power ---------- */
+  const pwHost = h('div', {});
+  const pwOut = h('div', { class: 'stats' });
+  const pw = PBS.chart(pwHost, { w: 760, h: 330, m: { l: 58, r: 16, t: 14, b: 50 }, xd: [1, 3.75], yd: [0, 1], xt: [1, Math.log10(30), 2, Math.log10(300), 3, Math.log10(3000)], xfmt: (v) => String(Math.round(Math.pow(10, v))), yt: [0, 0.2, 0.4, 0.6, 0.8, 1], yfmt: (v) => Math.round(v * 100) + '%', xlabel: 'Number of people (log scale)', ylabel: 'Chance of p < .05', label: 'Statistical power against sample size' });
+  function updatePower() {
+    const L = pw.layer();
+    L.append(s('line', { x1: pw.m.l, x2: pw.m.l + pw.iw, y1: pw.y(0.8), y2: pw.y(0.8), stroke: 'var(--muted)', 'stroke-dasharray': '5 4', 'stroke-width': 1.3 }));
+    L.append(s('text', { class: 'tick', x: pw.m.l + pw.iw - 4, y: pw.y(0.8) - 6, 'text-anchor': 'end', text: '80% power' }));
+    let d = '';
+    for (let v = 1; v <= 3.75; v += 0.02) { const n = Math.pow(10, v); d += (d ? 'L' : 'M') + pw.x(v).toFixed(1) + ' ' + pw.y(power(n, Math.max(trueR, 0.0001))).toFixed(1); }
+    L.append(s('path', { d, fill: 'none', stroke: 'var(--coral)', 'stroke-width': 3 }));
+    NS.forEach((n) => {
+      const pv = trueR > 0 ? power(n, trueR) : 0.05;
+      L.append(s('circle', { cx: pw.x(Math.log10(n)), cy: pw.y(pv), r: 6, fill: 'var(--blue)', stroke: 'var(--card)', 'stroke-width': 1.5 }));
+      L.append(s('text', { class: 'note', x: pw.x(Math.log10(n)) - (pv > 0.9 ? 12 : 0), y: pv > 0.9 ? pw.y(pv) + 26 : pw.y(pv) - 12, 'text-anchor': pv > 0.9 ? 'end' : 'middle', style: 'font-weight:700', text: 'N = ' + n.toLocaleString('en-GB') + ': ' + Math.round(pv * 100) + '%' }));
+    });
+    PBS.clear(pwOut);
+    if (trueR > 0) {
+      const n80 = Math.ceil(Math.pow((1.96 + 0.8416) / Math.atanh(trueR), 2) + 3);
+      pwOut.append(h('div', { class: 'stat' }, h('div', { class: 'k' }, 'People needed for 80% power'), h('div', { class: 'v coral' }, n80.toLocaleString('en-GB'))),
+        h('div', { class: 'stat' }, h('div', { class: 'k' }, 'Smallest significant |r| at N = 25'), h('div', { class: 'v' }, f(Math.tanh(1.96 / Math.sqrt(22)), 2))));
+    } else {
+      pwOut.append(h('div', { class: 'stat' }, h('div', { class: 'k' }, 'With no true effect'), h('div', { class: 'v' }, '5% still significant')));
+    }
+  }
+  root.append(PBS.card('How many people do you need?', [pwHost, h('div', { style: { marginTop: '10px' } }, pwOut), h('p', { class: 'src' }, 'Power is the chance that a study finds p < .05 when the true correlation is the one on the slider. It uses the same Fisher z approximation.')]));
+
+  /* ---------- tasks ---------- */
+  const tasks = h('div', { class: 'tasks', style: { marginTop: '22px' } },
+    h('h2', {}, 'Guided tasks'),
+    PBS.task({ tag: 'Predict first', title: '1. Out of 100 studies with 25 people and a true r of 0.10, how many reach p < .05?',
+      body: '<p class="small">Make your guess before you press anything. Then run 100 studies and compare.</p>',
+      options: [{ t: 'About 5', fb: 'That would be the rate if there were no true effect at all. A true effect of 0.10 adds a little.' }, { t: 'About 8', ok: true, fb: 'Power at N = 25 and r = 0.10 is only about 8%. A small effect and a small sample rarely reach p < .05.' }, { t: 'About 25', fb: 'Too high. A study this small would find the effect about once in a dozen tries.' }, { t: 'About 50', fb: 'Far too high. You need hundreds of people for even odds with an effect this small.' }] }),
+    PBS.numtask({ tag: 'Look at the dots', title: '2. What is the smallest correlation that can be significant with 25 people?',
+      body: '<div class="do"><b>Do this:</b> run a few hundred studies and look at the coral dots in the N = 25 row. Read off the one closest to zero, on either side.</div>',
+      label: 'Smallest |r|', answer: 0.4, tol: 0.03, fbRight: 'The cut-off is about 0.40. Every significant result at N = 25 is at least that large, and the true value is 0.10.', fbWrong: 'Look again: no coral dot sits between about −0.40 and +0.40. The cut-off is |r| ≈ 0.40.' }),
+    PBS.task({ tag: 'Predict', title: '3. Among the significant studies at N = 25, what is the average size of the observed correlation (ignoring sign)?',
+      body: '<p class="small">Check your answer against the last column of the table.</p>',
+      options: [{ t: 'About 0.10, the true value', fb: 'It would be, if significance did not select anything. But only large correlations can pass at this N.' }, { t: 'About 0.20', fb: 'Still too low: nothing smaller than about 0.40 can be significant at N = 25.' }, { t: 'About 0.45', ok: true, fb: 'Significant small studies overestimate the effect about fourfold. This is why published small-sample effects tend to shrink on replication.' }, { t: 'About 0.80', fb: 'Too high: the average sits just above the 0.40 cut-off.' }] }),
+    PBS.task({ tag: 'Predict', title: '4. Set the true correlation to 0 and run 500 studies. Among those with p < .05, which direction do the correlations point?',
+      options: [{ t: 'None are significant', fb: 'About 5% of studies are significant even when nothing is going on.' }, { t: 'Almost all positive', fb: 'There is nothing to favour either direction.' }, { t: 'About half positive, half negative', ok: true, fb: 'Chance gives false positives in both directions. Without a true effect, “significant” results are noise with a sign attached.' }, { t: 'Most are negative', fb: 'There is nothing to favour either direction.' }] }),
+    PBS.numtask({ tag: 'Calculate', title: '5. How many people do you need for 80% power when the true r is 0.10?',
+      body: '<div class="do"><b>Do this:</b> set the slider to 0.10, then read the “people needed” box under the power curve.</div>',
+      label: 'People', answer: 783, tol: 40, fbRight: 'Around 780. Lecture 1’s point about thousands of participants follows directly: for r around 0.1, you need hundreds just for even odds, and more to estimate the size well.', fbWrong: 'Set the slider to 0.10 and read the box: the answer is about 780.' }),
+    h('details', { class: 'more' }, h('summary', {}, 'Optional extension'), h('p', { style: { marginTop: '8px' } }, 'Set the true correlation to 0.30 and repeat tasks 1 to 3. How does the picture change? At which sample size does the average significant r come within 10% of the true value?')));
+  root.append(tasks);
+  root.append(PBS.takeaway([
+    'With a small true effect, small studies give a wide range of results, including large ones with the wrong sign.',
+    'Only the large results of small studies reach p < .05, so published small-sample effects are inflated.',
+    'Large samples do not make the effect bigger. They make the estimate reliable.']));
+
+  PBS.frame('sampling', root);
+  drawStrip(); updateTable(); updatePower(); draw1();
+})();
+</script>
+</body>
+</html>
