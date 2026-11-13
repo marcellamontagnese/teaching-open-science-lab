@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network lab – N2 Multimodal neuroimaging</title>
+<link rel="stylesheet" href="../pbs08-labs/shared.css">
+<style>
+  .netgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+  @media (max-width: 760px) { .netgrid { grid-template-columns: 1fr; } }
+  svg.net { width: 100%; height: auto; display: block; max-width: 420px; margin: 0 auto; }
+  svg.net line.e { stroke: var(--rose); stroke-width: 1; opacity: .55; }
+  svg.net line.e.sc { stroke: var(--coral); stroke-width: 2; opacity: 1; }
+  svg.net line.e.off { opacity: 0; }
+  svg.net circle.n { fill: var(--pink); stroke: var(--coral-ink); stroke-width: 1; }
+  svg.net circle.n.off { fill: none; stroke: var(--grid); stroke-dasharray: 2 2; }
+  svg.net circle.n.hub { fill: var(--coral); }
+  .zone { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; margin-top: -4px; }
+  .legend { font-size: 13.5px; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin: 0 5px 0 12px; border-radius: 2px; }
+  .legend i:first-child { margin-left: 0; }
+</style>
+</head>
+<body>
+<div class="wrap" id="root">
+  <noscript><p class="callout">This lab needs JavaScript. Please enable it and reload.</p></noscript>
+</div>
+<script src="../pbs08-labs/shared.js"></script>
+<script src="netcore.js"></script>
+<script>
+(function () {
+  'use strict';
+  const { h, s, f } = PBS;
+  const root = document.getElementById('root');
+  const pc = (x) => Math.round(x * 100) + '%';
+
+  root.append(
+    h('div', { class: 'topbar' },
+      h('div', { class: 'crumbs' }, h('span', {}, 'N2 · Multimodal neuroimaging'), h('span', {}, 'Network lab')),
+      h('div', {}, h('span', { class: 'pill' }, 'In the lecture · about 5 min'))),
+    h('h1', {}, 'Network lab'),
+    h('p', { class: 'sub' }, 'Once you have nodes and edges, the same graph measures apply whatever scan the network came from. Here you build a small world, then damage a network and watch communication fail.'),
+    h('div', { class: 'callout' }, 'Answer each question before you touch the slider. Everything runs in your browser on simulated networks; nothing is sent or saved.'));
+
+  /* ================================================================ Part 1: small world */
+  const N1 = 80, K1 = 6, SEED1 = 4;
+  const PS = [0, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1];
+  const A0 = NET.wattsStrogatz(N1, K1, 0, SEED1), C0 = NET.clustering(A0), L0 = NET.pathLength(A0);
+  // average curves over 8 networks per p, for the chart
+  const curve = PS.map((p) => {
+    let c = 0, l = 0; const R = p === 0 ? 1 : 8;
+    for (let r = 0; r < R; r++) { const A = NET.wattsStrogatz(N1, K1, p, 50 + r); c += NET.clustering(A); l += NET.pathLength(A); }
+    return { p, c: c / R / C0, l: l / R / L0 };
+  });
+  const ring = Array.from({ length: N1 }, (_, i) => { const a = 2 * Math.PI * i / N1 - Math.PI / 2; return [200 + 175 * Math.cos(a), 200 + 175 * Math.sin(a)]; });
+  const isLocal = (i, j) => { const d = Math.abs(i - j); return Math.min(d, N1 - d) <= K1 / 2; };
+
+  const net1 = s('svg', { class: 'net', viewBox: '0 0 400 400', role: 'img', 'aria-label': 'Ring network' });
+  const stats1 = h('div', { class: 'stats' });
+  const chartHost1 = h('div', {});
+  let pIdx = 0;
+  const slider1 = PBS.slider({ label: 'Share of links rewired at random', min: 0, max: PS.length - 1, step: 1, value: 0,
+    fmt: (i) => PS[i] === 0 ? 'none' : (PS[i] * 100 >= 1 ? Math.round(PS[i] * 100) + '%' : (PS[i] * 100).toFixed(1) + '%'),
+    onInput: (i) => { pIdx = i; draw1(); } });
+
+  const ch1 = PBS.chart(chartHost1, { w: 520, h: 300, m: { l: 52, r: 14, t: 14, b: 46 }, xd: [0, PS.length - 1], yd: [0, 1.05],
+    xt: [0, 3, 5, 7, 9], xfmt: (i) => PS[i] === 0 ? '0' : (PS[i] < 0.01 ? PS[i] * 100 + '%' : Math.round(PS[i] * 100) + '%'),
+    yt: [0, 0.25, 0.5, 0.75, 1], yfmt: (v) => Math.round(v * 100) + '%', xlabel: 'links rewired (log-like scale)', ylabel: '% of the ordered ring' });
+  const path = (key) => curve.map((d, i) => (i ? 'L' : 'M') + ch1.x(i).toFixed(1) + ' ' + ch1.y(d[key]).toFixed(1)).join(' ');
+  ch1.back.append(
+    s('path', { d: path('c'), fill: 'none', stroke: 'var(--coral)', 'stroke-width': 3 }),
+    s('path', { d: path('l'), fill: 'none', stroke: 'var(--blue)', 'stroke-width': 3 }),
+    s('text', { class: 'note', x: ch1.x(1.2), y: ch1.y(1.0) - 6, text: 'clustering', fill: 'var(--coral-ink)' }),
+    s('text', { class: 'note', x: ch1.x(1.2), y: ch1.y(curve[4].l) + 26, text: 'path length', fill: 'var(--blue)' }));
+
+  function draw1() {
+    const p = PS[pIdx], A = NET.wattsStrogatz(N1, K1, p, SEED1), C = NET.clustering(A), L = NET.pathLength(A);
+    PBS.clear(net1);
+    for (const [i, j] of NET.edges(A)) net1.append(s('line', { class: 'e' + (isLocal(i, j) ? '' : ' sc'), x1: ring[i][0], y1: ring[i][1], x2: ring[j][0], y2: ring[j][1] }));
+    for (const [x, y] of ring) net1.append(s('circle', { class: 'n', cx: x, cy: y, r: 4.2 }));
+    const shortcuts = NET.edges(A).filter(([i, j]) => !isLocal(i, j)).length;
+    PBS.clear(stats1).append(
+      h('div', { class: 'stat' }, h('div', { class: 'k' }, 'Clustering (vs ordered ring)'), h('div', { class: 'v coral' }, pc(C / C0))),
+      h('div', { class: 'stat' }, h('div', { class: 'k' }, 'Path length (vs ordered ring)'), h('div', { class: 'v' }, pc(L / L0))),
+      h('div', { class: 'stat' }, h('div', { class: 'k' }, 'Long-range shortcuts'), h('div', { class: 'v' }, String(shortcuts))));
+    const lay = ch1.layer();
+    lay.append(s('circle', { cx: ch1.x(pIdx), cy: ch1.y(C / C0), r: 6.5, fill: 'var(--coral)', stroke: 'var(--bg)', 'stroke-width': 2 }),
+      s('circle', { cx: ch1.x(pIdx), cy: ch1.y(L / L0), r: 6.5, fill: 'var(--blue)', stroke: 'var(--bg)', 'stroke-width': 2 }));
+  }
+
+  root.append(PBS.card('1 · Build a small world', [
+    h('p', {}, 'Eighty regions on a ring, each wired to its six nearest neighbours: a regular lattice. Now rewire a share of the links to random far-away regions. Coral lines are the long-range shortcuts.'),
+    PBS.task({ tag: 'Predict', title: 'Rewire only 5% of the links. What happens?',
+      options: [
+        { t: 'Clustering and path length both fall a lot', fb: 'Path length falls a lot, but clustering barely moves. Try it with the slider.' },
+        { t: 'Path length falls a lot, clustering stays high', ok: true, fb: 'A handful of shortcuts is enough to bring every region a few steps closer, while local neighbourhoods stay intact. That middle zone is the <i>small world</i>: high clustering (segregation) with short paths (integration).' },
+        { t: 'Clustering falls a lot, path length stays the same', fb: 'It is the other way round. Try it with the slider.' }] }),
+    h('div', { class: 'netgrid' },
+      h('div', {}, net1),
+      h('div', {}, slider1, h('div', { class: 'zone' }, h('span', {}, '← regular'), h('span', {}, 'small world'), h('span', {}, 'random →')), stats1, chartHost1))]));
+  draw1();
+
+  /* ================================================================ Part 2: damage */
+  const N2 = 60, SEED2 = 7;
+  const B = NET.hubNetwork(N2, 2, SEED2), deg = NET.degree(B), E0 = NET.efficiency(B);
+  const hubOrder = deg.map((d, i) => [d, i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]).map((x) => x[1]);
+  const shuffle = (seed) => { const r = NET.rng(seed); return [...Array(N2).keys()].map((i) => [r(), i]).sort((a, b) => a[0] - b[0]).map((x) => x[1]); };
+  const randOrder = shuffle(321), MAXR = 15;
+  const effAfter = (order, k) => { const g = new Array(N2).fill(false); order.slice(0, k).forEach((i) => { g[i] = true; }); return { g, e: NET.efficiency(B, g) / E0, piece: NET.largestPiece(B, g) }; };
+  const hubCurve = [], randCurve = [];
+  for (let k = 0; k <= MAXR; k++) {
+    hubCurve.push(effAfter(hubOrder, k).e);
+    let t = 0; for (let r = 0; r < 25; r++) t += effAfter(shuffle(1000 + r), k).e; randCurve.push(t / 25);
+  }
+  const pos = NET.layout(B, 11, 450).map(([x, y]) => [200 + 178 * x, 200 + 178 * y]);
+  const hubSet = new Set(hubOrder.slice(0, 6));
+
+  let mode = 'random', removed = 0;
+  const net2 = s('svg', { class: 'net', viewBox: '0 0 400 400', role: 'img', 'aria-label': 'Network with hubs' });
+  const stats2 = h('div', { class: 'stats' });
+  const chartHost2 = h('div', {});
+  const seg = PBS.seg({ label: 'Which regions fail', value: 'random', options: [{ v: 'random', label: 'Random regions' }, { v: 'hubs', label: 'Hubs first' }], onChange: (v) => { mode = v; draw2(); } });
+  const slider2 = PBS.slider({ label: 'Regions removed', min: 0, max: MAXR, step: 1, value: 0, fmt: (v) => v + ' of ' + N2, onInput: (v) => { removed = v; draw2(); } });
+
+  const ch2 = PBS.chart(chartHost2, { w: 520, h: 300, m: { l: 52, r: 14, t: 14, b: 46 }, xd: [0, MAXR], yd: [0, 1.05], xt: [0, 5, 10, 15],
+    yt: [0, 0.25, 0.5, 0.75, 1], yfmt: (v) => Math.round(v * 100) + '%', xlabel: 'regions removed', ylabel: 'global efficiency (% of intact)' });
+  const line2 = (arr) => arr.map((v, i) => (i ? 'L' : 'M') + ch2.x(i).toFixed(1) + ' ' + ch2.y(v).toFixed(1)).join(' ');
+  ch2.back.append(s('path', { d: line2(randCurve), fill: 'none', stroke: 'var(--blue)', 'stroke-width': 3 }),
+    s('path', { d: line2(hubCurve), fill: 'none', stroke: 'var(--coral)', 'stroke-width': 3 }));
+
+  function draw2() {
+    const st = effAfter(mode === 'hubs' ? hubOrder : randOrder, removed);
+    PBS.clear(net2);
+    for (const [i, j] of NET.edges(B)) net2.append(s('line', { class: 'e' + (st.g[i] || st.g[j] ? ' off' : ''), x1: pos[i][0], y1: pos[i][1], x2: pos[j][0], y2: pos[j][1] }));
+    for (let i = 0; i < N2; i++) net2.append(s('circle', { class: 'n' + (st.g[i] ? ' off' : (hubSet.has(i) ? ' hub' : '')), cx: pos[i][0], cy: pos[i][1], r: 2.5 + 2.2 * Math.sqrt(deg[i]) }));
+    PBS.clear(stats2).append(
+      h('div', { class: 'stat' }, h('div', { class: 'k' }, 'Global efficiency'), h('div', { class: 'v coral' }, pc(st.e))),
+      h('div', { class: 'stat' }, h('div', { class: 'k' }, 'Largest connected piece'), h('div', { class: 'v' }, st.piece + ' of ' + (N2 - removed))));
+    ch2.layer().append(s('circle', { cx: ch2.x(removed), cy: ch2.y(st.e), r: 6.5, fill: mode === 'hubs' ? 'var(--coral)' : 'var(--blue)', stroke: 'var(--bg)', 'stroke-width': 2 }));
+  }
+
+  root.append(PBS.card('2 · Damage the network', [
+    h('p', {}, 'A different network of 60 regions, grown so that a few regions collect many connections: hubs (larger, darker circles). Global efficiency asks how easily every region can reach every other, averaging one over the shortest path for each pair.'),
+    PBS.task({ tag: 'Predict', title: 'Ten regions fail. Which hurts communication more?',
+      options: [
+        { t: 'Ten random regions', fb: 'Random failures mostly hit poorly connected regions, and the network routes around them. Compare the two curves.' },
+        { t: 'The ten best-connected hubs', ok: true, fb: 'Losing the hubs breaks the shortcuts that hold the network together: efficiency collapses and the network falls apart into pieces. Such networks are robust to random failure but fragile to targeted attack.' },
+        { t: 'About the same either way', fb: 'Compare the two curves: they part company quickly.' }] }),
+    h('div', { class: 'netgrid' },
+      h('div', {}, net2),
+      h('div', {}, seg, slider2, stats2, chartHost2,
+        h('div', { class: 'legend' }, h('i', { style: { background: 'var(--blue)' } }), 'random (average of 25 runs)', h('i', { style: { background: 'var(--coral)' } }), 'hubs first')))]));
+  draw2();
+
+  /* ================================================================ Part 3: link to the workshop papers */
+  root.append(PBS.card('3 · Back to the papers', [
+    PBS.task({ tag: 'Think', title: 'Lo et al. (2010, Group B) found that white-matter networks in Alzheimer’s disease had longer paths and lower global efficiency than in controls. Which change in this lab moves a network in that direction?',
+      options: [
+        { t: 'Rewiring more links at random', fb: 'Random rewiring adds shortcuts, so paths get <i>shorter</i>, not longer.' },
+        { t: 'Losing connections or regions, especially well-connected ones', ok: true, fb: 'Losing links that carry shortcuts makes paths longer and efficiency lower. A toy model cannot tell you <i>why</i> it happens in patients; that is a question for the paper and its methods.' },
+        { t: 'Neither: graph measures cannot be compared between groups', fb: 'They can, and all three workshop papers do. The care is in interpretation, because an edge means something different in each.' }] }),
+    h('div', { class: 'callout soft', html: 'The maths is identical for all three workshop papers. What changes is the meaning of an edge: <b>Group A</b>, similarity between regions’ morphometric profiles (MRI); <b>Group B</b>, white-matter streamlines (diffusion tractography); <b>Group C</b>, correlated BOLD time series (resting-state fMRI).' })]));
+
+  root.append(PBS.takeaway([
+    'A few long-range shortcuts shorten paths across the whole network while local clustering survives: a small world.',
+    'Networks with hubs tolerate random failures but are fragile when the hubs are lost.',
+    'Graph measures are generic; their interpretation depends on the modality that defined the edges.']));
+  root.append(h('p', { class: 'src', html: 'Watts, D. J. &amp; Strogatz, S. H. (1998). Collective dynamics of ‘small-world’ networks. <i>Nature</i>, 393, 440–442. · Albert, R., Jeong, H. &amp; Barabási, A.-L. (2000). Error and attack tolerance of complex networks. <i>Nature</i>, 406, 378–382. · Achard, S. et al. (2006). A resilient, low-frequency, small-world human brain functional network with highly connected association cortical hubs. <i>J Neurosci</i>, 26, 63–72. · Lo, C.-Y. et al. (2010). <i>J Neurosci</i>, 30, 16876–16885. The networks on this page are simulated teaching examples, not brain data.' }));
+})();
+</script>
+</body>
+</html>
